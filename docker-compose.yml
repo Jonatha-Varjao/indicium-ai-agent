@@ -1,0 +1,117 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: langfuse
+    volumes:
+      - langfuse_postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    profiles:
+      - observability
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.3-alpine
+    environment:
+      CLICKHOUSE_USER: clickhouse
+      CLICKHOUSE_PASSWORD: clickhouse
+    volumes:
+      - langfuse_clickhouse:/var/lib/clickhouse
+    healthcheck:
+      test: ["CMD-SHELL", "clickhouse-client --query 'SELECT 1'"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    profiles:
+      - observability
+
+  redis:
+    image: redis:7-alpine
+    command: >
+      --requirepass myredissecret
+      --maxmemory-policy noeviction
+    volumes:
+      - langfuse_redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "myredissecret", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    profiles:
+      - observability
+
+  langfuse:
+    image: langfuse/langfuse:latest
+    ports:
+      - "3000:3000"
+    environment:
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/langfuse
+      - CLICKHOUSE_MIGRATION_URL=clickhouse://clickhouse:9000
+      - CLICKHOUSE_URL=http://clickhouse:8123
+      - CLICKHOUSE_USER=clickhouse
+      - CLICKHOUSE_PASSWORD=clickhouse
+      - CLICKHOUSE_CLUSTER_ENABLED=false
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_AUTH=myredissecret
+      - NEXTAUTH_URL=http://localhost:3000
+      - NEXTAUTH_SECRET=dev-only-secret-langfuse-poc
+      - SALT=dev-only-salt-langfuse-poc
+      - ENCRYPTION_KEY=0000000000000000000000000000000000000000000000000000000000000000
+      - LANGFUSE_ENABLE_SIGNUP=true
+      # S3 config (disabled — needed to pass validation)
+      - LANGFUSE_S3_EVENT_UPLOAD_BUCKET=langfuse
+      - LANGFUSE_S3_EVENT_UPLOAD_REGION=auto
+      - LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID=minio
+      - LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY=minio123
+      - LANGFUSE_S3_EVENT_UPLOAD_ENDPOINT=http://localhost:9000
+      - LANGFUSE_S3_EVENT_UPLOAD_FORCE_PATH_STYLE=true
+      - LANGFUSE_S3_MEDIA_UPLOAD_BUCKET=langfuse
+      - LANGFUSE_S3_MEDIA_UPLOAD_REGION=auto
+      - LANGFUSE_S3_MEDIA_UPLOAD_ACCESS_KEY_ID=minio
+      - LANGFUSE_S3_MEDIA_UPLOAD_SECRET_ACCESS_KEY=minio123
+      - LANGFUSE_S3_MEDIA_UPLOAD_ENDPOINT=http://localhost:9090
+      - LANGFUSE_S3_MEDIA_UPLOAD_FORCE_PATH_STYLE=true
+      # Headless init — auto-create org, project, API keys, user
+      - LANGFUSE_INIT_ORG_ID=srag-org
+      - LANGFUSE_INIT_ORG_NAME=SRAG Agent
+      - LANGFUSE_INIT_PROJECT_ID=srag-project
+      - LANGFUSE_INIT_PROJECT_NAME=SRAG Surveillance
+      - LANGFUSE_INIT_PROJECT_PUBLIC_KEY=pk-lf-srag-agent-local
+      - LANGFUSE_INIT_PROJECT_SECRET_KEY=sk-lf-srag-agent-local
+      - LANGFUSE_INIT_USER_EMAIL=admin@example.com
+      - LANGFUSE_INIT_USER_PASSWORD=admin1234
+    depends_on:
+      postgres:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    profiles:
+      - observability
+
+  srag-pipeline:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      - LANGFUSE_HOST=http://langfuse:3000
+      - PROJECT_ROOT=/app
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+      - ./outputs:/app/outputs
+    profiles:
+      - pipeline
+
+volumes:
+  langfuse_postgres:
+  langfuse_clickhouse:
+  langfuse_redis:
