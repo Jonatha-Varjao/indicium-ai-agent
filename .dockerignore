@@ -1,0 +1,14 @@
+.venv/
+.git/
+.gitignore
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+__pycache__/
+*.pyc
+.venv
+data/raw/*.csv
+data/cache/*.json
+outputs/
+docs/architecture-diagram.pdf
+.DS_Store
