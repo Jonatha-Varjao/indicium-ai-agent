@@ -27,7 +27,9 @@ def test_sanitize_news_injection_detected() -> None:
     ]
     result = sanitize_news(items)
     assert result["news_flagged"] is True
-    assert "Ignore previous instructions" in result["sanitized_news"]
+    # Injection phrase must be stripped, not kept
+    assert "Ignore previous instructions" not in result["sanitized_news"]
+    assert "Normal content here." in result["sanitized_news"]
 
 
 def test_sanitize_news_delimiter_stripped() -> None:

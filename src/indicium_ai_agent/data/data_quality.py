@@ -1,6 +1,12 @@
+"""Data quality helpers: encoding detection, PII verification, column selection."""
+
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
+
+import chardet
+import pandas as pd
 
 PII_COLUMNS: list[str] = [
     "NU_CPF",
@@ -43,19 +49,49 @@ SELECTED_COLUMNS: list[str] = [
 ]
 
 
-def detect_encoding(path: str) -> str:
-    import chardet
+def detect_encoding(path: str | Path) -> str:
+    """Detect CSV file encoding.
 
-    with open(path, "rb") as f:
+    Uses ``chardet`` to guess encoding from the first 100 kB. DATASUS SRAG
+    files are historically encoded in ``latin-1`` (ISO-8859-1), so ASCII/UTF-8
+    detections are coerced to ``latin-1`` to preserve accented characters.
+
+    Args:
+        path: Path to the CSV file (``str`` or ``Path``).
+
+    Returns:
+        Detected encoding string (e.g. ``"latin-1"`` or ``"utf-8"``).
+    """
+    file_path = Path(path)
+    with open(file_path, "rb") as f:
         raw = f.read(100000)
-    result = chardet.detect(raw)
-    encoding = result["encoding"] or "latin-1"
+    result: Any = chardet.detect(raw)
+    encoding: str | None = result.get("encoding")
+    if encoding is None:
+        return "latin-1"
+    # DATASUS files declare latin-1; chardet often returns ascii for pure-ascii
+    # samples which is compatible but we normalize to latin-1 for consistency.
     if encoding.lower() in ("ascii", "utf-8"):
-        encoding = "latin-1"
+        return "latin-1"
     return encoding
 
 
-def verify_and_log_pii(df: Any, exclusion_log: dict) -> dict:
+def verify_and_log_pii(
+    df: pd.DataFrame,
+    exclusion_log: dict[str, Any],
+) -> dict[str, Any]:
+    """Verify presence of PII columns and record findings.
+
+    Mutates ``exclusion_log`` in-place by adding a ``"pii_columns"`` key and
+    returns the same dict for convenience.
+
+    Args:
+        df: Input DataFrame to inspect.
+        exclusion_log: Mutable log dict that will be updated.
+
+    Returns:
+        The same ``exclusion_log`` instance, now containing ``pii_columns``.
+    """
     pii_findings: dict[str, str] = {}
     for col in PII_COLUMNS:
         if col in df.columns:
@@ -66,7 +102,22 @@ def verify_and_log_pii(df: Any, exclusion_log: dict) -> dict:
     return exclusion_log
 
 
-def select_columns(df: Any, exclusion_log: dict) -> Any:
+def select_columns(
+    df: pd.DataFrame,
+    exclusion_log: dict[str, Any],
+) -> pd.DataFrame:
+    """Select only ``SELECTED_COLUMNS`` present in ``df``.
+
+    Mutates ``exclusion_log`` in-place if any selected columns are missing.
+
+    Args:
+        df: Input DataFrame.
+        exclusion_log: Mutable log dict updated with missing columns info.
+
+    Returns:
+        DataFrame containing only the intersection of ``SELECTED_COLUMNS``
+        and ``df.columns``.
+    """
     kept = [c for c in SELECTED_COLUMNS if c in df.columns]
     dropped = [c for c in SELECTED_COLUMNS if c not in df.columns]
     if dropped:

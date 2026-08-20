@@ -1,14 +1,59 @@
 from __future__ import annotations
 
 import json
+import logging
 from datetime import UTC, datetime
-from typing import Any
+from enum import Enum
+from typing import Any, TypedDict
 
 from indicium_ai_agent.config.settings import get_settings
+from indicium_ai_agent.state import ReportState
+
+logger = logging.getLogger(__name__)
 
 
-def _extract_metric_audit(metrics: dict[str, Any]) -> dict[str, dict[str, Any]]:
-    result: dict[str, dict[str, Any]] = {}
+class AuditMetric(TypedDict, total=False):
+    """Typed metric entry for audit payload."""
+
+    value: Any
+    computable: bool
+    numerator: Any
+    denominator: Any
+    period: str
+    definition_ref: str
+    query: str
+
+
+class AuditPayload(TypedDict, total=False):
+    """Typed payload for audit log JSON."""
+
+    run_id: str
+    timestamp: str
+    data_mode: Any
+    data_check_result: Any
+    source_csv_hash: Any
+    source_extraction_date: Any
+    exclusion_log: Any
+    metrics: dict[str, AuditMetric]
+    chart_paths: Any
+    news_source: Any
+    news_flagged: bool
+    narrative_draft: str
+    validation_diff: Any
+    retry_count: int
+    validation_passed: bool
+
+
+def _extract_metric_audit(metrics: dict[str, Any]) -> dict[str, AuditMetric]:
+    """Extract auditable fields from computed metrics.
+
+    Args:
+        metrics: Computed metrics dict.
+
+    Returns:
+        Filtered metrics with only auditable fields.
+    """
+    result: dict[str, AuditMetric] = {}
     for key, data in metrics.items():
         result[key] = {
             "value": data.get("value"),
@@ -22,12 +67,22 @@ def _extract_metric_audit(metrics: dict[str, Any]) -> dict[str, dict[str, Any]]:
     return result
 
 
-def write_audit_log(state: dict[str, Any]) -> str:
+def write_audit_log(state: ReportState | dict[str, Any]) -> str:
+    """Write audit log JSON for the report run.
+
+    Non-blocking: filesystem errors are logged as warnings and do not raise.
+
+    Args:
+        state: Pipeline report state or dict with run metadata.
+
+    Returns:
+        Path to the audit log file as string.
+    """
     settings = get_settings()
     audit_dir = settings.output_audit_dir
     audit_dir.mkdir(parents=True, exist_ok=True)
 
-    payload: dict[str, Any] = {
+    payload: AuditPayload = {
         "run_id": state.get("run_id", "unknown"),
         "timestamp": datetime.now(UTC).isoformat(),
         "data_mode": state.get("data_mode"),
@@ -47,6 +102,14 @@ def write_audit_log(state: dict[str, Any]) -> str:
 
     filename = f"audit_log_{state.get('run_id', 'unknown')}.json"
     path = audit_dir / filename
-    with open(path, "w") as f:
-        json.dump(payload, f, indent=2, default=str)
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(
+                payload,
+                f,
+                indent=2,
+                default=lambda o: o.value if isinstance(o, Enum) else str(o),
+            )
+    except OSError as exc:
+        logger.warning("audit log write failed (non-blocking): %s", exc)
     return str(path)
