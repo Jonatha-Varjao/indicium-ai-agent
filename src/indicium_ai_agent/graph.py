@@ -39,6 +39,8 @@ NODE_LOG_TRACE = "log_trace"
 
 def _node_check_and_sync(state: ReportState) -> dict[str, Any]:
     """Check freshness and sync CSV; returns paths and check result."""
+    if state.get("error"):
+        return {}
     try:
         settings = get_settings()
         result = check_and_sync_data(
@@ -58,6 +60,8 @@ def _node_check_and_sync(state: ReportState) -> dict[str, Any]:
 
 def _node_load_and_clean(state: ReportState) -> dict[str, Any]:
     """Load CSV, strip PII and register DuckDB table."""
+    if state.get("error"):
+        return {}
     try:
         result = load_and_clean(state["raw_csv_path"])
         return {
@@ -73,6 +77,8 @@ def _node_load_and_clean(state: ReportState) -> dict[str, Any]:
 
 def _node_compute_metrics(state: ReportState) -> dict[str, Any]:
     """Compute epidemiological metrics for the selected period."""
+    if state.get("error"):
+        return {}
     try:
         start = state["start_date"]
         end = state["end_date"]
@@ -88,6 +94,8 @@ def _node_compute_metrics(state: ReportState) -> dict[str, Any]:
 
 def _node_generate_charts(state: ReportState) -> dict[str, Any]:
     """Generate charts from DuckDB metrics."""
+    if state.get("error"):
+        return {}
     try:
         settings = get_settings()
         con = state.get("con")
@@ -102,6 +110,8 @@ def _node_generate_charts(state: ReportState) -> dict[str, Any]:
 
 def _node_fetch_news(state: ReportState) -> dict[str, Any]:
     """Fetch contextual news for the metrics period."""
+    if state.get("error"):
+        return {}
     try:
         result = fetch_news(state["metrics"])
         return {"news_items": result["news_items"], "news_source": result["news_source"]}
@@ -112,6 +122,8 @@ def _node_fetch_news(state: ReportState) -> dict[str, Any]:
 
 def _node_sanitize_news(state: ReportState) -> dict[str, Any]:
     """Sanitize fetched news for LLM consumption."""
+    if state.get("error"):
+        return {}
     try:
         result = sanitize_news(state["news_items"])
         return {
@@ -125,6 +137,8 @@ def _node_sanitize_news(state: ReportState) -> dict[str, Any]:
 
 def _node_synthesize_narrative(state: ReportState) -> dict[str, Any]:
     """Synthesize narrative from metrics and sanitized news."""
+    if state.get("error"):
+        return {}
     try:
         result = synthesize_narrative(
             state["metrics"], state["sanitized_news"], state["news_source"]
@@ -137,6 +151,8 @@ def _node_synthesize_narrative(state: ReportState) -> dict[str, Any]:
 
 def _node_validate_narrative(state: ReportState) -> dict[str, Any]:
     """Validate narrative grounding and update retry counter."""
+    if state.get("error"):
+        return {}
     try:
         result = validate_narrative(
             narrative_draft=state["narrative_draft"],
@@ -157,6 +173,8 @@ def _node_validate_narrative(state: ReportState) -> dict[str, Any]:
 
 def _node_render_report(state: ReportState) -> dict[str, Any]:
     """Render final Markdown report."""
+    if state.get("error"):
+        return {}
     try:
         result = render_report(
             metrics=cast(Any, state["metrics"]),
@@ -198,7 +216,9 @@ def _should_retry(state: ReportState) -> str:
     """Decide whether narrative synthesis should be retried.
 
     Returns ``"continue"`` when validation passed or max retries reached,
-    otherwise ``"retry"`` to loop back to synthesis.
+    otherwise ``"retry"`` to loop back to synthesis. If pipeline already
+    has an error, never retry — proceed to render/audit to preserve the
+    original failure.
 
     Args:
         state: Current graph state containing ``validation_passed`` and
@@ -207,6 +227,8 @@ def _should_retry(state: ReportState) -> str:
     Returns:
         Routing key for conditional edge: ``"continue"`` or ``"retry"``.
     """
+    if state.get("error"):
+        return "continue"
     if state.get("validation_passed", False) or state.get("retry_count", 0) >= MAX_RETRIES:
         return "continue"
     return "retry"

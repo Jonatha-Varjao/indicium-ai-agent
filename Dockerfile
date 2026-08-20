@@ -7,7 +7,10 @@ WORKDIR /app
 COPY pyproject.toml README.md uv.lock ./
 COPY src/ src/
 
-RUN pip install uv -q && uv sync --frozen --no-dev -q 2>/dev/null || pip install . -q
+RUN pip install uv -q && uv sync --frozen --no-dev
+
+ENV PATH="/app/.venv/bin:$PATH"
+ENV VIRTUAL_ENV="/app/.venv"
 
 COPY . .
 

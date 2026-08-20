@@ -12,6 +12,7 @@ executes all nodes (0-9), and prints a summary of the results.
 from __future__ import annotations
 
 import argparse
+import sys
 from datetime import UTC, date, datetime, timedelta
 
 from indicium_ai_agent.config.settings import DataMode, get_settings
@@ -118,6 +119,10 @@ def main() -> None:
         get_client().flush()
 
     _print_summary(result)
+
+    if result.get("error"):
+        print(f"\n[error] pipeline failed: {result['error']}", file=sys.stderr)
+        sys.exit(1)
 
 
 if __name__ == "__main__":
