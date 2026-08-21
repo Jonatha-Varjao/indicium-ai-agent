@@ -2,7 +2,7 @@ NEWS_DOMAIN_ALLOWLIST: dict[str, list[str]] = {
     "tier1_authoritative": [
         "fiocruz.br",
         "agencia.fiocruz.br",
-        "gov.br/saude",
+        "gov.br",
     ],
     "tier2_journalism": [
         "agenciabrasil.ebc.com.br",

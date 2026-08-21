@@ -35,6 +35,7 @@ def test_create_handler_returns_handler_when_configured() -> None:
     ):
         mock_s.return_value.langfuse_public_key = "pk-test"
         mock_s.return_value.langfuse_secret_key = "sk-test"
+        mock_s.return_value.langfuse_host = "http://localhost:3000"
         mock_h = mock_cls.return_value
         handler = create_langfuse_handler()
         assert handler is mock_h

@@ -131,7 +131,7 @@ O sistema é orquestrado por **LangGraph** com 11 nós em sequência determinís
 | Guardrails | §8 (3 verificações determinísticas) |
 | Uso de Tools | §4 (DuckDB), §6 (Tavily), §5 (Matplotlib) |
 | Tratamento de Dados Sensíveis | §3.3 (PII stripping, colunas selecionadas) |
-| Clean Code | Pure functions, types, 95 testes, ruff 0 erros, mypy 0 erros |
+| Clean Code | Pure functions, types, 158 testes, ruff 0 erros, mypy strict 0 erros, cobertura 86% (gate 80%) |
 
 ---
 
@@ -410,9 +410,10 @@ Se o Tavily falhar ou retornar zero resultados, o pipeline define `news_source =
 ### 6.5 Sanitização
 
 Antes de passar o conteúdo ao LLM, o Node 5 (`sanitize_news`) executa:
-1. Varredura de padrões de injeção ("ignore", "disregard", "override", etc.)
-2. Remoção dos delimitadores `{{NEWS_CONTENT_START}}`/`{{NEWS_CONTENT_END}}` do interior do texto
-3. Delimitação do conteúdo entre os marcadores
+1. Remoção dos delimitadores `{{NEWS_CONTENT_START}}`/`{{NEWS_CONTENT_END}}` do interior do texto
+2. Varredura de padrões de injeção em dois idiomas — inglês ("ignore previous instructions", "act as", etc.) e português ("ignore/desconsidere as instruções anteriores", "aja como", "você é agora"), com qualificadores que evitam falsos positivos em notícias legítimas de saúde
+3. Frases sinalizadas são **removidas** do conteúdo (`re.sub`), não apenas marcadas; itens que ficam vazios após a limpeza são descartados
+4. Delimitação do conteúdo restante entre os marcadores
 
 ---
 
@@ -473,12 +474,12 @@ Se a chamada ao Gemini falhar (cota excedida, erro de API), o pipeline retorna:
 
 **Solução determinística** (sem LLM):
 
-1. Extrai todos os números da narrativa usando regex
+1. Extrai todos os números da narrativa usando regex com fronteiras de dígito, filtrando anos plausíveis (1900–2100 sem `%` adjacente) e componentes de datas
 2. Canonicaliza formato decimal (vírgula → ponto)
-3. Compara cada número contra os valores das métricas com tolerância de ±0.01
-4. Números não correspondentes são registrados no `validation_diff` e removidos
+3. Compara cada número contra os valores das métricas: tolerância **absoluta** de ±0.01 para valores permitidos zero e tolerância **relativa** de 1% para valores não-zero
+4. Números não correspondentes são registrados no `validation_diff` e removidos com substituição ciente de fronteira de dígito (não corrompe `199.9` ao remover `99.9`)
 
-**Cobertura de testes**: 5 testes unitários específicos, incluindo números inventados, tolerância de arredondamento, e métricas não computáveis.
+**Cobertura de testes**: testes unitários específicos incluindo números inventados, tolerância de arredondamento e métricas não computáveis.
 
 ### 8.2 Ancoragem de Fontes (Node 7)
 
@@ -507,6 +508,8 @@ Se a chamada ao Gemini falhar (cota excedida, erro de API), o pipeline retorna:
 | Validação falha, tentativas < 3 | Pipeline retorna ao Node 6 |
 | Validação falha, tentativas ≥ 3 | Relatório publicado com aviso |
 | Aviso após 3 tentativas | "Narrativa parcialmente validada — consulte a tabela de métricas oficiais." |
+
+**Falhas fatais (halt-on-error)**: nós determinísticos críticos (sync, ETL, métricas, gráficos, render) interrompem o avanço quando um erro já existe no estado — os wrappers retornam vazio, preservando o **primeiro** erro sem sobrescrita. O grafo ainda executa `log_audit` e `log_trace` para registrar a falha no JSON de auditoria (campo `error`) e no Langfuse. A CLI encerra com código 1 exibindo o erro em stderr.
 
 ---
 
@@ -617,11 +620,11 @@ Kubernetes seria excesso de engenharia para uma PoC de 5 serviços. Docker Compo
 
 | Indicador | Valor |
 |---|---|
-| Testes unitários | 95 |
-| Cobertura de código | Todas as funções com lógica |
-| Erros Ruff | 0 |
-| Erros Mypy | 0 |
-| Módulos Python | 19 |
-| Linhas de código | ~1.756 |
+| Testes unitários | 158 |
+| Cobertura de código (branch) | 86% — gate `--cov-fail-under=80` |
+| Erros Ruff | 0 (E/F/I/B/UP/S/C90/RUF) |
+| Erros Mypy | 0 (strict) |
+| Módulos Python | 30 |
+| Linhas de código | ~3.370 |
 | Serviços Docker | 5 |
 | Tempo de execução | ~30s (pinned), ~5-15min (live c/ download) |

@@ -84,3 +84,20 @@ def test_audit_log_filename_contains_run_id(tmp_path: Path) -> None:
     state = _minimal_state()
     result = write_audit_log(state)
     assert "test-run-001" in Path(result).name
+
+
+def test_audit_log_records_error_on_failed_run(tmp_path: Path) -> None:
+    """Fatal pipeline errors must be persisted for auditability (§9.1.1)."""
+    state = {**_minimal_state(), "error": "disk full"}
+    result = write_audit_log(state)
+    with open(result) as f:
+        data = json.load(f)
+    assert data["error"] == "disk full"
+
+
+def test_audit_log_error_absent_when_none(tmp_path: Path) -> None:
+    state = {**_minimal_state(), "error": None}
+    result = write_audit_log(state)
+    with open(result) as f:
+        data = json.load(f)
+    assert data["error"] is None

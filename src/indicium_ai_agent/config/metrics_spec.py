@@ -1,6 +1,47 @@
 from __future__ import annotations
 
-METRICS: dict[str, dict] = {
+from typing import Final, TypedDict
+
+
+class ReturnShape(TypedDict):
+    """Shape of a metric result dict."""
+
+    value: str
+    computable: str
+    numerator: str
+    denominator: str
+    period: str
+    definition_ref: str
+    query: str
+
+
+class MetricSpec(TypedDict, total=False):
+    """Specification for a single epidemiological metric."""
+
+    name: str
+    definition: str
+    formula_ref: str
+    anchor_column: str
+    window: str
+    caveat: str
+    return_shape: ReturnShape
+    evolucao_codes: dict[str, object]
+    fields: list[str]
+    data_source: str
+    fallback: str
+
+
+DEFAULT_RETURN_SHAPE: Final[ReturnShape] = {
+    "value": "float | None",
+    "computable": "bool",
+    "numerator": "int",
+    "denominator": "int",
+    "period": "str",
+    "definition_ref": "str",
+    "query": "str",
+}
+
+METRICS: Final[dict[str, MetricSpec]] = {
     "case_growth_rate": {
         "name": "Taxa de aumento de casos",
         "definition": (
@@ -14,15 +55,7 @@ METRICS: dict[str, dict] = {
             "Os últimos ~7–14 dias podem estar subnotificados "
             "(atraso de notificação)."
         ),
-        "return_shape": {
-            "value": "float | None",
-            "computable": "bool",
-            "numerator": "int",
-            "denominator": "int",
-            "period": "str",
-            "definition_ref": "str",
-            "query": "str",
-        },
+        "return_shape": DEFAULT_RETURN_SHAPE,
     },
     "mortality_rate": {
         "name": "Taxa de mortalidade",
@@ -46,15 +79,7 @@ METRICS: dict[str, dict] = {
             "e EVOLUCAO=9 (ignorado) são excluídos "
             "do denominador."
         ),
-        "return_shape": {
-            "value": "float | None",
-            "computable": "bool",
-            "numerator": "int",
-            "denominator": "int",
-            "period": "str",
-            "definition_ref": "str",
-            "query": "str",
-        },
+        "return_shape": DEFAULT_RETURN_SHAPE,
     },
     "uti_admission_rate": {
         "name": "Taxa de internação em UTI entre casos de SRAG",
@@ -71,15 +96,7 @@ METRICS: dict[str, dict] = {
             "Reflete a proporção de casos hospitalizados que "
             "necessitaram de UTI, não a ocupação de leitos."
         ),
-        "return_shape": {
-            "value": "float | None",
-            "computable": "bool",
-            "numerator": "int",
-            "denominator": "int",
-            "period": "str",
-            "definition_ref": "str",
-            "query": "str",
-        },
+        "return_shape": DEFAULT_RETURN_SHAPE,
     },
     "vaccination_coverage": {
         "name": "Taxa de vacinação",
@@ -115,7 +132,7 @@ METRICS: dict[str, dict] = {
     },
 }
 
-CHART_SPECS: dict[str, dict] = {
+CHART_SPECS: Final[dict[str, dict[str, str]]] = {
     "daily_cases": {
         "name": "Número diário de casos — últimos 30 dias",
         "window": "30 dias",

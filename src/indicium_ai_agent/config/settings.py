@@ -1,18 +1,34 @@
 from __future__ import annotations
 
-from enum import Enum
+import zoneinfo
+from enum import StrEnum
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-PROJECT_ROOT: Path = Path(__file__).resolve().parents[3]
-if not (PROJECT_ROOT / "pyproject.toml").exists() and not (PROJECT_ROOT / "src").is_dir():
-    PROJECT_ROOT = Path("/app") if Path("/app/pyproject.toml").exists() else Path.cwd()
+
+def _find_project_root() -> Path:
+    """Locate project root by searching for pyproject.toml upwards."""
+    current = Path(__file__).resolve()
+    for parent in current.parents:
+        if (parent / "pyproject.toml").exists():
+            return parent
+    # Docker fallback
+    docker_root = Path("/app")
+    if (docker_root / "pyproject.toml").exists():
+        return docker_root
+    return Path.cwd()
 
 
-class DataMode(str, Enum):
+PROJECT_ROOT: Path = _find_project_root()
+
+# Pinned snapshot filename for reproducible runs (DATASUS SRAG 2026).
+PINNED_SNAPSHOT_FILENAME: str = "INFLUD26-20-07-2026.csv"
+
+
+class DataMode(StrEnum):
     LIVE = "live"
     PINNED = "pinned"
 
@@ -38,7 +54,10 @@ class Settings(BaseSettings):
     )
     data_mode: DataMode = Field(
         default=DataMode.PINNED,
-        description="Pipeline data source mode: 'pinned' (reproducible) or 'live' (freshness-check)",
+        description=(
+            "Pipeline data source mode: 'pinned' (reproducible) "
+            "or 'live' (freshness-check)"
+        ),
     )
     timezone: str = Field(
         default="America/Sao_Paulo",
@@ -52,12 +71,23 @@ class Settings(BaseSettings):
 
     llm_temperature: float = Field(
         default=0.2,
-        description="Temperature for the LLM narrative synthesis call",
+        ge=0.0,
+        le=1.0,
+        description="Temperature for the LLM narrative synthesis call (0.0-1.0)",
     )
 
     project_root: Path = Field(
         default=PROJECT_ROOT, description="Project root directory"
     )
+
+    @field_validator("timezone")
+    @classmethod
+    def _validate_timezone(cls, v: str) -> str:
+        try:
+            zoneinfo.ZoneInfo(v)
+        except zoneinfo.ZoneInfoNotFoundError as exc:
+            raise ValueError(f"Invalid timezone: {v}") from exc
+        return v
 
     @property
     def data_raw_dir(self) -> Path:
@@ -84,10 +114,15 @@ class Settings(BaseSettings):
         return self.project_root / "outputs" / "logs"
 
     @property
+    def pinned_snapshot_filename(self) -> str:
+        """Filename for the pinned reproducible snapshot."""
+        return PINNED_SNAPSHOT_FILENAME
+
+    @property
     def datasus_resource_url(self) -> str:
         return (
             "https://s3.sa-east-1.amazonaws.com/ckan.saude.gov.br"
-            "/SRAG/2026/INFLUD26-20-07-2026.csv"
+            f"/SRAG/2026/{PINNED_SNAPSHOT_FILENAME}"
         )
 
     @property
@@ -100,4 +135,4 @@ class Settings(BaseSettings):
 
 @lru_cache
 def get_settings() -> Settings:
-    return Settings()  # type: ignore[call-arg]
+    return Settings.model_validate({})
