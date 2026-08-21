@@ -285,6 +285,15 @@ def test_log_audit_exception(mock_audit: MagicMock) -> None:
     assert result == {"error": "readonly fs"}
 
 
+@patch(f"{G}.write_audit_log", side_effect=OSError("readonly fs"))
+def test_log_audit_preserves_existing_error(mock_audit: MagicMock) -> None:
+    """Audit failure must never overwrite the originating pipeline error."""
+    result = _node_log_audit(_state(error="original failure"))
+    assert result == {}
+    # The audit exception is still observable via logs, not via state
+    mock_audit.assert_called_once()
+
+
 @patch(f"{G}.log_langfuse_trace")
 def test_log_trace_happy_returns_none(mock_trace: MagicMock) -> None:
     result = _node_log_trace(_state())
@@ -337,3 +346,25 @@ def test_pipeline_halt_preserves_first_error(tmp_path: Path) -> None:
     assert result.get("error") == "first"
     # Audit still written for provenance
     assert m_audit.called
+
+
+def test_pipeline_audit_failure_does_not_mask_original_error(tmp_path: Path) -> None:
+    """Original failure must survive even when log_audit itself raises."""
+    initial = _state()
+    with (
+        patch(f"{G}.check_and_sync_data", side_effect=RuntimeError("first")) as m_sync,
+        patch(f"{G}.load_and_clean"),
+        patch(f"{G}.compute_metrics"),
+        patch(f"{G}.render_report"),
+        patch(f"{G}.write_audit_log", side_effect=OSError("readonly fs")) as m_audit,
+        patch(f"{G}.log_langfuse_trace"),
+        patch(f"{G}.get_settings") as m_settings,
+    ):
+        m_settings.return_value.data_raw_dir = tmp_path
+        m_settings.return_value.data_cache_dir = tmp_path
+        result: ReportState = build_graph().invoke(initial)
+
+    m_sync.assert_called_once()
+    m_audit.assert_called_once()
+    # CLI reports the originating failure, not the audit OSError
+    assert result.get("error") == "first"

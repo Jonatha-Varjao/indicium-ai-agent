@@ -195,12 +195,18 @@ def _node_render_report(state: ReportState) -> dict[str, Any]:
 
 
 def _node_log_audit(state: ReportState) -> dict[str, Any]:
-    """Write audit log JSON for the current run."""
+    """Write audit log JSON for the current run.
+
+    Runs even when the pipeline already failed (audit provenance), but
+    never overwrites an existing ``error`` with an audit failure.
+    """
     try:
         path = write_audit_log(cast(dict[str, Any], state))
         return {"audit_log_path": path}
     except Exception as exc:
         logger.exception("log_audit failed: %s", exc)
+        if state.get("error"):
+            return {}
         return {"error": str(exc)}
 
 
