@@ -17,6 +17,7 @@ COPY . .
 RUN useradd -m app && chown -R app:app /app
 USER app
 
-HEALTHCHECK --interval=30s --timeout=5s --retries=3 CMD python -c "import sys; sys.exit(0)"
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+  CMD python -c "from indicium_ai_agent.graph import build_graph"
 
 ENTRYPOINT ["python", "scripts/run_report.py"]

@@ -83,7 +83,7 @@ ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "--cov=src --cov-report=term-missing --cov-fail-under=75"
+addopts = "--cov=src --cov-report=term-missing --cov-fail-under=80"
 pythonpath = ["src", "."]
 
 [tool.coverage.run]

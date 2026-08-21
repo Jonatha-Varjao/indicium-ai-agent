@@ -93,6 +93,19 @@ def _execute_aggregate(
     return tuple(row)
 
 
+def _normalize_aggregates(row: tuple[Any, ...]) -> list[int | None]:
+    """Normalize an aggregate row into ints or ``None`` per column.
+
+    Args:
+        row: Raw tuple from :func:`_execute_aggregate` (may be empty).
+
+    Returns:
+        List with one entry per expected aggregate: the value as
+        ``int``, or ``None`` when absent/NULL.
+    """
+    return [int(v) if v is not None else None for v in row]
+
+
 def _build_result(
     value: float | dict[str, float] | None,
     numerator: int | dict[str, int],
@@ -171,18 +184,9 @@ def get_case_growth_rate(
         mid_point.isoformat(),
     ]
     row = _execute_aggregate(con, query, params)
-
-    if not row:
-        current_raw: int | None = None
-        prior_raw: int | None = None
-    else:
-        current_raw = int(row[0]) if row[0] is not None else None
-        prior_raw = int(row[1]) if len(row) > 1 and row[1] is not None else None
-        # Handle case where row has None but we saw empty tuple already
-        if row[0] is None:
-            current_raw = None
-        if len(row) > 1 and row[1] is None:
-            prior_raw = None
+    vals = _normalize_aggregates(row)
+    current_raw: int | None = vals[0] if len(vals) > 0 else None
+    prior_raw: int | None = vals[1] if len(vals) > 1 else None
 
     current: int = 0 if current_raw is None else current_raw
     prior: int = 0 if prior_raw is None else prior_raw
@@ -232,17 +236,9 @@ def get_mortality_rate(
     """
     params: Sequence[Any] = [start_date_str, end_date_str]
     row = _execute_aggregate(con, query, params)
-
-    if not row:
-        obitos_raw: int | None = None
-        resolvidos_raw: int | None = None
-    else:
-        obitos_raw = int(row[0]) if row[0] is not None else None
-        resolvidos_raw = int(row[1]) if len(row) > 1 and row[1] is not None else None
-        if row[0] is None:
-            obitos_raw = None
-        if len(row) > 1 and row[1] is None:
-            resolvidos_raw = None
+    vals = _normalize_aggregates(row)
+    obitos_raw: int | None = vals[0] if len(vals) > 0 else None
+    resolvidos_raw: int | None = vals[1] if len(vals) > 1 else None
 
     obitos: int = 0 if obitos_raw is None else obitos_raw
     resolvidos: int = 0 if resolvidos_raw is None else resolvidos_raw
@@ -290,17 +286,9 @@ def get_uti_admission_rate(
     """
     params: Sequence[Any] = [start_date_str, end_date_str]
     row = _execute_aggregate(con, query, params)
-
-    if not row:
-        uti_raw: int | None = None
-        hospital_raw: int | None = None
-    else:
-        uti_raw = int(row[0]) if row[0] is not None else None
-        hospital_raw = int(row[1]) if len(row) > 1 and row[1] is not None else None
-        if row[0] is None:
-            uti_raw = None
-        if len(row) > 1 and row[1] is None:
-            hospital_raw = None
+    vals = _normalize_aggregates(row)
+    uti_raw: int | None = vals[0] if len(vals) > 0 else None
+    hospital_raw: int | None = vals[1] if len(vals) > 1 else None
 
     uti_cases: int = 0 if uti_raw is None else uti_raw
     hospital_cases: int = 0 if hospital_raw is None else hospital_raw
@@ -352,21 +340,10 @@ def get_vaccination_coverage(
     """
     params: Sequence[Any] = [start_date_str, end_date_str]
     row = _execute_aggregate(con, query, params)
-
-    if not row:
-        cov_raw: int | None = None
-        flu_raw: int | None = None
-        hospital_raw: int | None = None
-    else:
-        cov_raw = int(row[0]) if row[0] is not None else None
-        flu_raw = int(row[1]) if len(row) > 1 and row[1] is not None else None
-        hospital_raw = int(row[2]) if len(row) > 2 and row[2] is not None else None
-        if row[0] is None:
-            cov_raw = None
-        if len(row) > 1 and row[1] is None:
-            flu_raw = None
-        if len(row) > 2 and row[2] is None:
-            hospital_raw = None
+    vals = _normalize_aggregates(row)
+    cov_raw: int | None = vals[0] if len(vals) > 0 else None
+    flu_raw: int | None = vals[1] if len(vals) > 1 else None
+    hospital_raw: int | None = vals[2] if len(vals) > 2 else None
 
     cov_vaccinated: int = 0 if cov_raw is None else cov_raw
     flu_vaccinated: int = 0 if flu_raw is None else flu_raw

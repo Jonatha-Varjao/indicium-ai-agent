@@ -21,6 +21,30 @@ INJECTION_PATTERNS: Final[list[re.Pattern[str]]] = [
     re.compile(r"(?i)\boverride\s+(previous\s+)?instructions\b"),
 ]
 
+# Portuguese-language phrases — the curated news domain is Brazilian
+# (Fiocruz, gov.br, national press), so PT-BR injection attempts are the
+# realistic threat model. Qualifier words keep false positives low:
+# "não ignore as orientações médicas" does NOT match ("ignorar" != "ignore",
+# "orientações" alone lacks the imperative verb + qualifier pair).
+INJECTION_PATTERNS_PT: Final[list[re.Pattern[str]]] = [
+    re.compile(
+        r"(?i)\b(?:ignore|desconsidere|desobede[çc]a)\s+"
+        r"(?:todas\s+as\s+|as\s+)?(?:instru[çc][õo]es|regras|ordens)\s+"
+        r"(?:anteriores|pr[ée]vias|previas|acima|do\s+sistema)\b"
+    ),
+    re.compile(
+        r"(?i)\bdesconsidere\s+(?:tudo\s+)?o\s+"
+        r"(?:que\s+foi\s+dito|texto|conte[úu]do)\s+(?:acima|anterior)\b"
+    ),
+    re.compile(r"(?i)\baja\s+como\b"),
+    re.compile(r"(?i)\bassuma\s+o\s+papel\b"),
+    re.compile(r"(?i)\bvoc[êe]\s+[ée]\s+agora\b"),
+]
+
+ALL_INJECTION_PATTERNS: Final[list[re.Pattern[str]]] = (
+    INJECTION_PATTERNS + INJECTION_PATTERNS_PT
+)
+
 
 class SanitizeNewsResult(TypedDict):
     """Result of :func:`sanitize_news`."""
@@ -30,13 +54,13 @@ class SanitizeNewsResult(TypedDict):
 
 
 def _is_flagged(text: str) -> bool:
-    """Return ``True`` if *text* matches any injection pattern."""
-    return any(pattern.search(text) for pattern in INJECTION_PATTERNS)
+    """Return ``True`` if *text* matches any injection pattern (EN or PT-BR)."""
+    return any(pattern.search(text) for pattern in ALL_INJECTION_PATTERNS)
 
 
 def _strip_injection(text: str) -> str:
     """Remove injection phrases from *text* and normalise whitespace."""
-    for pattern in INJECTION_PATTERNS:
+    for pattern in ALL_INJECTION_PATTERNS:
         text = pattern.sub("", text)
     text = re.sub(r"\s{2,}", " ", text).strip()
     text = re.sub(r"\s+([.,;])", r"\1", text)

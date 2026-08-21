@@ -42,6 +42,7 @@ class AuditPayload(TypedDict, total=False):
     validation_diff: Any
     retry_count: int
     validation_passed: bool
+    error: str | None
 
 
 def _extract_metric_audit(metrics: dict[str, Any]) -> dict[str, AuditMetric]:
@@ -98,6 +99,7 @@ def write_audit_log(state: ReportState | dict[str, Any]) -> str:
         "validation_diff": state.get("validation_diff"),
         "retry_count": state.get("retry_count", 0),
         "validation_passed": state.get("validation_passed", False),
+        "error": state.get("error"),
     }
 
     filename = f"audit_log_{state.get('run_id', 'unknown')}.json"
