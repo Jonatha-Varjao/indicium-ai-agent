@@ -25,15 +25,22 @@ _MONTHS_PT: Final[str] = (
     r"jul(?:ho)?|ago(?:sto)?|set(?:embro)?|out(?:ubro)?|nov(?:embro)?|dez(?:embro)?)"
 )
 
-# Numbers followed by a month name are prose dates; an intermediate
-# "e DD" covers ranges ("entre 13 e 20 de julho").
+# Numbers followed by a month name are prose dates; intermediate
+# "e DD"/"a DD" covers ranges ("entre 13 e 20", "de 13 a 20 de julho").
 _DATE_CONTEXT: Final[re.Pattern[str]] = re.compile(
-    rf"\s*(?:e\s+\d{{1,2}}\s*)?(?:de\s+)?{ _MONTHS_PT }\b", re.IGNORECASE
+    rf"\s*(?:[ae]\s+\d{{1,2}}\s*)?(?:de\s+)?{ _MONTHS_PT }\b", re.IGNORECASE
 )
 # Numbers followed by "dia(s)" are duration references to documented
 # windows; "a N" covers ranges ("últimos 7 a 14 dias").
 _DURATION_CONTEXT: Final[re.Pattern[str]] = re.compile(
     r"\s*(?:a\s+\d+)?\s*dias?\b", re.IGNORECASE
+)
+# Methodology anchors that legitimise a window reference; must appear
+# within the short window before the token.
+_DURATION_ANCHOR_RE: Final[re.Pattern[str]] = re.compile(
+    r"(?:últim[oa]s|ultimos|próxim[oa]s|proximos|per[íi]odo(?:\s+de)?|"
+    r"janela(?:\s+de)?|ao\s+longo\s+de|durante)\s+[^.;]{0,20}$",
+    re.IGNORECASE,
 )
 
 _MONTHS_RE = _DATE_CONTEXT
@@ -77,11 +84,28 @@ def _is_documented_year(raw: str) -> bool:
     return 1900 <= int(raw) <= 2100
 
 
-def _is_documented_duration(num: float, tail: str) -> bool:
-    """Duration token referencing a documented methodology window (7/14)."""
+def _is_documented_duration(num: float, tail: str, before_context: str) -> bool:
+    """Duration token referencing a documented methodology window (7/14).
+
+    Exemption requires BOTH the value to be a known window AND an
+    anchoring methodology phrase immediately before the token
+    ("últimos 7 dias", "próximos 14 dias", "período de 7 a 14 dias").
+    Bare clinical claims like "internação média de 7 dias" do NOT match
+    and stay subject to numeric grounding.
+
+    Args:
+        num: Token value with sign.
+        tail: Text immediately after the token.
+        before_context: Lowercased text window before the token.
+
+    Returns:
+        Whether the token is exempt from grounding as a documented window.
+    """
     if not _DURATION_CONTEXT.match(tail):
         return False
-    return num.is_integer() and int(abs(num)) in KNOWN_DURATION_DAYS
+    if not (num.is_integer() and int(abs(num)) in KNOWN_DURATION_DAYS):
+        return False
+    return _DURATION_ANCHOR_RE.search(before_context) is not None
 
 
 def _extract_all_numbers(text: str) -> list[tuple[str, float, int]]:
@@ -120,6 +144,9 @@ def _extract_all_numbers(text: str) -> list[tuple[str, float, int]]:
         # Letter-hyphen codes: the "19" in "COVID-19"
         if before == "-" and start >= 2 and text[start - 2].isalpha():
             continue
+        # Alphanumeric codes: the "1" in "g1", the "2" in "H3N2"
+        if before.isalpha():
+            continue
         if _is_documented_year(raw):
             continue
         num = canonicalize_number(raw)
@@ -130,7 +157,10 @@ def _extract_all_numbers(text: str) -> list[tuple[str, float, int]]:
             num = -num
         tail = text[end:]
         # Prose dates stay contextual (calendar facts, not quantities)
-        if _DATE_CONTEXT.match(tail) or _is_documented_duration(num, tail):
+        before_context = text[max(0, start - _DIRECTION_WINDOW):start].lower()
+        if _DATE_CONTEXT.match(tail) or _is_documented_duration(
+            num, tail, before_context
+        ):
             continue
         matches.append((raw, num, start))
     return matches
@@ -141,7 +171,8 @@ def _get_metric_values(metrics: dict[str, Any]) -> list[float]:
 
     Includes metric ``value``, plus numerators/denominators — both are
     provided verbatim to the LLM in the user prompt, so citing them is
-    grounded by definition.
+    grounded by definition. Unit proportions (0 < |v| < 1) also accept
+    their percent voicing (``0.388`` -> ``38.8``), a standard reading.
 
     Args:
         metrics: Full metrics dict.
@@ -159,12 +190,21 @@ def _get_metric_values(metrics: dict[str, Any]) -> list[float]:
         for field in ("value", "numerator", "denominator"):
             val = data.get(field)
             if isinstance(val, dict):
-                values.extend(
-                    float(v) for v in val.values() if isinstance(v, (int, float))
-                )
+                for sub in val.values():
+                    _append_allowed(values, sub)
             elif isinstance(val, (int, float)):
-                values.append(float(val))
+                _append_allowed(values, val)
     return values
+
+
+def _append_allowed(values: list[float], v: Any) -> None:
+    """Append one allowed value, plus its percent voice when unit-scaled."""
+    if not isinstance(v, (int, float)):
+        return
+    f = float(v)
+    values.append(f)
+    if 0 < abs(f) < 1:
+        values.append(f * 100)
 
 
 _DECREASE_WORDS: Final[tuple[str, ...]] = (
@@ -175,6 +215,17 @@ _INCREASE_WORDS: Final[tuple[str, ...]] = (
     "aumento", "alta", "crescimento", "elevação", "subida",
     "subiu", "aumentou", "cresceu", "maior",
 )
+
+# Word-boundary alternation (longest first so "aumentos" still hits
+# "aumento"); used to locate the NEAREST direction word to the token.
+_DIRECTION_RE: Final[re.Pattern[str]] = re.compile(
+    r"(?i)\b("
+    + "|".join(
+        sorted((*_DECREASE_WORDS, *_INCREASE_WORDS), key=len, reverse=True)
+    )
+    + r")\b"
+)
+_DECREASE_SET: Final[frozenset[str]] = frozenset(_DECREASE_WORDS)
 
 # How many chars before a token to look for the direction word
 _DIRECTION_WINDOW: Final[int] = 48
@@ -188,15 +239,31 @@ def _within_tolerance(num: float, allowed: float) -> bool:
     return diff / abs(allowed) <= ROUNDING_TOLERANCE
 
 
+def _nearest_direction_word(context: str) -> str | None:
+    """Return the direction word occurring LAST in *context* (nearest the
+    numeric token), or None when no direction word is present.
+
+    Args:
+        context: Lowercased text immediately before the token.
+
+    Returns:
+        The matched word in lowercase, or None.
+    """
+    last: str | None = None
+    for match in _DIRECTION_RE.finditer(context):
+        last = match.group().lower()
+    return last
+
+
 def _is_grounded(num: float, allowed: float, context: str) -> bool:
     """Direction-aware grounding check.
 
     1. Signed match within tolerance always passes.
-    2. Opposite-sign magnitude passes ONLY when the preceding prose
-       carries the direction word implied by the metric's sign
-       ("redução/queda..." for negative metrics). This blocks publishing
-       the opposite epidemiological trend ("aumento de 78,12%" for
-       -78.12) while accepting legitimate reduction phrasing.
+    2. Opposite-sign magnitude passes ONLY when the direction word
+       NEAREST the token carries the polarity implied by the metric's
+       sign ("redução/queda..." for negative metrics). A nearer
+       conflicting word ("...queda anterior; aumento de 78,12%") wins,
+       so opposite trends can never be grounded by an earlier clause.
 
     Args:
         num: Token value with its literal sign.
@@ -210,35 +277,68 @@ def _is_grounded(num: float, allowed: float, context: str) -> bool:
         return True
     if num == 0 or allowed == 0:
         return False
-    if _within_tolerance(abs(num), abs(allowed)):
-        words = _DECREASE_WORDS if allowed < 0 else _INCREASE_WORDS
-        return any(word in context for word in words)
-    return False
+    if not _within_tolerance(abs(num), abs(allowed)):
+        return False
+    nearest = _nearest_direction_word(context)
+    if allowed < 0:
+        return nearest is not None and nearest in _DECREASE_SET
+    # allowed > 0: magnitude of a positive metric must read as increase
+    return nearest is not None and nearest not in _DECREASE_SET
+
+
+def _collect_news_numbers(news_items: list[dict[str, str]] | None) -> frozenset[float]:
+    """Collect numbers appearing verbatim in retrieved news items.
+
+    The LLM legitimately cites statistics from the sanitized news block
+    (rule 4 of the system prompt); such figures are grounded by their
+    source even though they are not pipeline-computed metrics. The same
+    extraction/noise filters apply, so prose dates etc. are excluded.
+
+    Args:
+        news_items: News items with ``title``/``snippet`` fields.
+
+    Returns:
+        Set of canonicalised values found across all items.
+    """
+    values: set[float] = set()
+    for item in news_items or []:
+        blob = f"{item.get('title', '')} {item.get('snippet', '')}"
+        values.update(
+            v for _raw, v, _start in _extract_all_numbers(blob)
+        )
+    return frozenset(values)
 
 
 def check_numeric_grounding(
     narrative: str,
     metrics: dict[str, Any],
+    news_items: list[dict[str, str]] | None = None,
 ) -> tuple[bool, list[dict[str, Any]]]:
-    """Check that every number in the narrative is grounded in metrics.
+    """Check that every number in the narrative is grounded.
 
-    Sign-sensitive tolerance; opposite-sign magnitudes require the
-    direction word implied by the metric sign in the nearby prose.
+    A token is grounded when it matches (sign-aware, direction-checked)
+    a computed metric value/numerator/denominator, or appears verbatim
+    in a retrieved news item.
 
     Args:
         narrative: Narrative text to validate.
         metrics: Computed metrics providing allowed values.
+        news_items: Retrieved news whose own figures are citable.
 
     Returns:
         Tuple of (is_valid, mismatches).
     """
     allowed_values = _get_metric_values(metrics)
+    news_values = _collect_news_numbers(news_items)
     found = _extract_all_numbers(narrative)
     mismatches: list[dict[str, Any]] = []
 
     for raw, num, start in found:
         context = narrative[max(0, start - _DIRECTION_WINDOW):start].lower()
-        if not any(_is_grounded(num, allowed, context) for allowed in allowed_values):
+        grounded_metric = any(
+            _is_grounded(num, allowed, context) for allowed in allowed_values
+        )
+        if not grounded_metric and num not in news_values:
             mismatches.append({"raw": raw, "value": num})
 
     return len(mismatches) == 0, mismatches
@@ -340,7 +440,9 @@ def validate_narrative(
         and retry_count.
     """
     narrative_draft = coerce_content_to_str(narrative_draft)
-    numeric_ok, numeric_diff = check_numeric_grounding(narrative_draft, metrics)
+    numeric_ok, numeric_diff = check_numeric_grounding(
+        narrative_draft, metrics, news_items
+    )
     source_ok, source_diff = check_source_grounding(narrative_draft, news_items)
 
     validation_diff: dict[str, Any] = {}

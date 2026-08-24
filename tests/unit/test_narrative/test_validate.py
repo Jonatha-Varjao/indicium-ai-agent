@@ -94,6 +94,79 @@ def test_numeric_grounding_rejects_wrong_direction() -> None:
     assert diffs and diffs[0]["raw"] == "78,12%"
 
 
+def test_numeric_grounding_nearest_direction_word_wins() -> None:
+    """Review regression: an earlier 'queda' within the window must not
+    ground a nearer conflicting 'aumento' claim on a negative metric."""
+    narrative = (
+        "Após queda de 3,1% na semana passada, registrou-se "
+        "aumento de 78,12% no número de casos."
+    )
+    metrics = {
+        "case_growth_rate": {"computable": True, "value": -78.12},
+    }
+    # The 3,1% claim itself has no grounding either; what matters here
+    # is that 78,12% is flagged despite 'queda' appearing earlier.
+    ok, diffs = check_numeric_grounding(narrative, metrics)
+    assert ok is False
+    raws = {d["raw"] for d in diffs}
+    assert "78,12%" in raws
+
+
+def test_numeric_grounding_signed_match_ignores_direction_words() -> None:
+    """Exact signed values pass regardless of nearby direction words —
+    direction vocabulary only gates OPPOSITE-SIGN magnitude matching."""
+    metrics = {"mortality_rate": {"computable": True, "value": 0.0579}}
+    ok, _ = check_numeric_grounding(
+        "Após queda anterior, mortalidade de 0,0579.", metrics
+    )
+    assert ok is True
+
+
+def test_negative_metric_magnitude_requires_decrease_nearest() -> None:
+    """Positive magnitude on a negative metric: polarity of the NEAREST
+    direction word decides — both plain and conflicting-clause forms."""
+    metrics = {"case_growth_rate": {"computable": True, "value": -78.12}}
+
+    ok, _ = check_numeric_grounding("Alta isolada de 78,12%.", metrics)  # wrong dir
+    assert ok is False
+
+    ok, diffs = check_numeric_grounding(
+        "Observou-se aumento de 78,12% nos casos.", metrics
+    )
+    assert ok is False and any(d["raw"] == "78,12%" for d in diffs)
+
+    ok, _ = check_numeric_grounding("Queda de 78,12% confirmada.", metrics)
+    assert ok is True
+
+
+def test_unsupported_duration_with_clinical_framing_is_flagged() -> None:
+    """Review regression: value-based exemption let fabricated clinical
+    durations ('internação média de 7 dias') bypass grounding."""
+    from indicium_ai_agent.narrative.validate import _extract_all_numbers
+
+    text = "pacientes apresentaram internação média de 7 dias."
+    extracted = _extract_all_numbers(text)
+    assert any(raw == "7" for raw, _v, _s in extracted)
+
+    metrics = {"mortality_rate": {"computable": True, "value": 0.0579}}
+    ok, diffs = check_numeric_grounding(text, metrics)
+    assert ok is False
+    assert any(d["raw"] == "7" for d in diffs)
+
+
+def test_anchored_duration_frames_still_skipped() -> None:
+    """Legitimate temporal frames keep their documented-window skip."""
+    from indicium_ai_agent.narrative.validate import _extract_all_numbers
+
+    for frame in (
+        "dados dos últimos 14 dias.",
+        "acompanhamento nos próximos 7 dias.",
+        "evolução ao longo de 7 dias.",
+        "monitoramento durante 14 dias.",
+    ):
+        assert _extract_all_numbers(frame) == [], frame
+
+
 def test_numeric_grounding_accepts_signed_literal_without_direction_word() -> None:
     """Explicit '-N' literals carry their own sign; no verb needed."""
     narrative = "observou-se variação de -78,1200 na taxa de casos."
@@ -151,6 +224,19 @@ def test_extract_skips_prose_noise() -> None:
     assert _extract_all_numbers(text) == []
 
 
+def test_extract_skips_alphanumeric_codes_and_de_ranges() -> None:
+    """Review-followup regressions from a real pipeline run:
+    'g1' (news outlet) must not yield token '1'; the range variant
+    'de 13 a 20 de julho' must stay contextual like 'entre 13 e 20'."""
+    from indicium_ai_agent.narrative.validate import _extract_all_numbers
+
+    assert _extract_all_numbers("Conforme reportado pelo g1, cenário em 2026.") == []
+    assert (
+        _extract_all_numbers("análise dos dados de 13 a 20 de julho de 2026 indica.")
+        == []
+    )
+
+
 def test_extract_skips_prose_date_and_duration_ranges() -> None:
     """Ranges ('entre 13 e 20 de julho', '7 a 14 dias') aren't values."""
     from indicium_ai_agent.narrative.validate import _extract_all_numbers
@@ -171,6 +257,59 @@ def test_numeric_grounding_still_catches_invention() -> None:
     ok, diffs = check_numeric_grounding(narrative, metrics)
     assert ok is False
     assert diffs[0]["raw"] == "42.7%"
+
+
+def test_numbers_from_retrieved_news_are_grounded() -> None:
+    """Figures cited faithfully from news items ground via the source."""
+    narrative = (
+        "A Bahia registrou 1.732 casos até março, com crescimento "
+        "de 14,6% nos casos."
+    )
+    metrics = {"case_growth_rate": {"computable": True, "value": -78.12}}
+    news = [
+        {
+            "title": "Bahia registra aumento nos casos de SRAG",
+            "snippet": "o estado apontou crescimento de 14,6% nos casos; "
+                       "foram 1.732 registros até março.",
+            "url": "https://g1.globo.com/ba/srag",
+        }
+    ]
+    ok, diffs = check_numeric_grounding(narrative, metrics, news)
+    assert ok is True, diffs
+
+
+def test_news_grounding_does_not_open_invention_door() -> None:
+    """Numbers absent from both metrics and news stay blocked even when
+    other numbers were legitimately grounded from news."""
+    narrative = "A Bahia registrou 1.732 casos e a mortalidade foi de 88,8%."
+    metrics: dict = {}
+    news = [
+        {"title": "Bahia SRAG", "snippet": "crescimento de 14,6%; 1.732 registros."}
+    ]
+    ok, diffs = check_numeric_grounding(narrative, metrics, news)
+    assert ok is False
+    assert [d["raw"] for d in diffs] == ["88,8%"]
+
+
+def test_percent_voicing_of_unit_proportions_is_grounded() -> None:
+    """'0.388' may be voiced as '38,8%' — same fact, percent scale."""
+    narrative = "A cobertura vacinal é de 38,8% para COVID-19 e 41,55% para Influenza."
+    metrics = {
+        "vaccination_coverage": {
+            "computable": True,
+            "value": {"covid": 0.388, "flu": 0.4155},
+        }
+    }
+    ok, diffs = check_numeric_grounding(narrative, metrics)
+    assert ok is True, diffs
+
+
+def test_percent_voicing_does_not_scale_percent_metrics() -> None:
+    """Metrics already in percent must NOT accept a x100 reading."""
+    narrative = "A taxa cresceu 7812% no período."
+    metrics = {"case_growth_rate": {"computable": True, "value": -78.12}}
+    ok, _diffs = check_numeric_grounding(narrative, metrics)
+    assert ok is False
 
 
 def test_numeric_grounding_passes() -> None:
