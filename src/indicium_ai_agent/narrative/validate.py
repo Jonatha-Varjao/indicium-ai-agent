@@ -13,18 +13,53 @@ from indicium_ai_agent.narrative._utils import coerce_content_to_str
 # values (e.g. 0.05 absolute 0.01 == 20% relative would incorrectly pass).
 ROUNDING_TOLERANCE: Final[float] = 0.01
 
+# PT-BR thousands grouping: 7.485 / 129.373 / 1.234.567 (leading block captured)
+_THOUSANDS_GROUPED: Final[re.Pattern[str]] = re.compile(r"^(\d{1,3})(?:\.\d{3})+$")
+
+_MONTHS_PT: Final[str] = (
+    r"(?:jan(?:eiro)?|fev(?:ereiro)?|mar[çc]o|abr(?:il)?|mai(?:o)?|jun(?:ho)?|"
+    r"jul(?:ho)?|ago(?:sto)?|set(?:embro)?|out(?:ubro)?|nov(?:embro)?|dez(?:embro)?)"
+)
+
+# Numbers followed by a month name are prose dates; an intermediate
+# "e DD" covers ranges ("entre 13 e 20 de julho").
+_DATE_CONTEXT: Final[re.Pattern[str]] = re.compile(
+    rf"\s*(?:e\s+\d{{1,2}}\s*)?(?:de\s+)?{ _MONTHS_PT }\b", re.IGNORECASE
+)
+# Numbers followed by "dia(s)" are duration references to documented
+# windows; "a N" covers ranges ("últimos 7 a 14 dias").
+_DURATION_CONTEXT: Final[re.Pattern[str]] = re.compile(
+    r"\s*(?:a\s+\d+)?\s*dias?\b", re.IGNORECASE
+)
+
+_MONTHS_RE = _DATE_CONTEXT
+
 
 def canonicalize_number(text: str) -> float | None:
-    """Parse a numeric string with optional % and comma decimal.
+    """Parse a numeric string using PT-BR conventions.
+
+    Rules (domain is a Brazilian narrative):
+    - Comma is the decimal separator; dots, when a comma exists, are
+      thousands separators (``1.234,56`` → ``1234.56``).
+    - Dot-grouped integers without a comma are thousands-separated
+      counts (``7.485`` → ``7485``), not decimals.
+    - A trailing ``%`` is ignored.
 
     Args:
-        text: Raw numeric token (e.g. "15,5%").
+        text: Raw numeric token (e.g. "15,5%", "7.485").
 
     Returns:
         Float value or None if parsing fails.
     """
     cleaned = text.strip().removesuffix("%")
-    cleaned = cleaned.replace(",", ".")
+    if "," in cleaned:
+        cleaned = cleaned.replace(".", "").replace(",", ".")
+    else:
+        grouped = _THOUSANDS_GROUPED.match(cleaned)
+        # Thousands grouping ("7.485") only when the leading block isn't
+        # "0" — "0.154" is a decimal, never a count.
+        if grouped and grouped.group(1) != "0":
+            cleaned = cleaned.replace(".", "")
     try:
         return float(cleaned)
     except (ValueError, TypeError):
@@ -32,11 +67,15 @@ def canonicalize_number(text: str) -> float | None:
 
 
 def _extract_all_numbers(text: str) -> list[tuple[str, float]]:
-    """Extract numeric tokens from text, filtering years.
+    """Extract numeric tokens, filtering non-quantitative contexts.
 
-    Uses a digit-boundary-aware pattern and excludes 4-digit years
-    (1900-2100) when not near a % sign, and skips numbers that are part
-    of slash-separated dates.
+    Skips tokens that are structurally not metric values:
+    - components of slash-dates (``20/07/2026``)
+    - 4-digit years 1900-2100 without a ``%``
+    - ordinals (``1º``)
+    - letter-hyphen codes (the ``19`` in ``COVID-19``)
+    - prose dates (number followed by a month name)
+    - day-duration references (``7 dias``, matching documented windows)
 
     Args:
         text: Narrative text to scan.
@@ -49,21 +88,26 @@ def _extract_all_numbers(text: str) -> list[tuple[str, float]]:
     for match in re.finditer(pattern, text):
         raw = match.group()
         start, end = match.span()
-        # Skip numbers that are adjacent to "/" (part of a date like 20/07/2026)
         before = text[start - 1] if start > 0 else ""
         after = text[end] if end < len(text) else ""
+        # Slash-date components
         if before == "/" or after == "/":
             continue
-        # Filter out 4-digit years 1900-2100 when not a percentage
-        if "%" not in raw:
-            # Only consider plain 4-digit integers as potential years
-            if re.fullmatch(r"\d{4}", raw):
-                try:
-                    year = int(raw)
-                except ValueError:
-                    year = -1
-                if 1900 <= year <= 2100:
-                    continue
+        # Ordinals: "1º de janeiro"
+        if after == "º":
+            continue
+        # Letter-hyphen codes: the "19" in "COVID-19"
+        if before == "-" and start >= 2 and text[start - 2].isalpha():
+            continue
+        # Prose dates and durations
+        tail = text[end:]
+        if _DATE_CONTEXT.match(tail) or _DURATION_CONTEXT.match(tail):
+            continue
+        # Plain 4-digit years 1900-2100 when not a percentage
+        if "%" not in raw and re.fullmatch(r"\d{4}", raw):
+            year = int(raw)
+            if 1900 <= year <= 2100:
+                continue
         num = canonicalize_number(raw)
         if num is not None:
             matches.append((raw, num))
@@ -71,10 +115,11 @@ def _extract_all_numbers(text: str) -> list[tuple[str, float]]:
 
 
 def _get_metric_values(metrics: dict[str, Any]) -> list[float]:
-    """Collect all computable metric values as floats.
+    """Collect all values the narrative is allowed to reference.
 
-    Handles scalar metrics and dict values (e.g. vaccination coverage
-    which has separate values per pathogen).
+    Includes metric ``value``, plus numerators/denominators — both are
+    provided verbatim to the LLM in the user prompt, so citing them is
+    grounded by definition.
 
     Args:
         metrics: Full metrics dict.
@@ -89,14 +134,28 @@ def _get_metric_values(metrics: dict[str, Any]) -> list[float]:
             continue
         if not data.get("computable", False):
             continue
-        val = data.get("value")
-        if isinstance(val, dict):
-            for v in val.values():
-                if isinstance(v, (int, float)):
-                    values.append(float(v))
-        elif isinstance(val, (int, float)):
-            values.append(float(val))
+        for field in ("value", "numerator", "denominator"):
+            val = data.get(field)
+            if isinstance(val, dict):
+                values.extend(
+                    float(v) for v in val.values() if isinstance(v, (int, float))
+                )
+            elif isinstance(val, (int, float)):
+                values.append(float(val))
     return values
+
+
+def _is_grounded(num: float, allowed: float) -> bool:
+    """Sign-agnostic tolerance check.
+
+    Magnitude comparison: an LLM legitimately phrases negative rates as
+    positive magnitudes ("redução de 78,12%" for -78.12), so the sign
+    carries meaning in words while the number itself is grounded.
+    """
+    diff = abs(abs(num) - abs(allowed))
+    if allowed == 0:
+        return diff <= ROUNDING_TOLERANCE
+    return diff / abs(allowed) <= ROUNDING_TOLERANCE
 
 
 def check_numeric_grounding(
@@ -119,18 +178,7 @@ def check_numeric_grounding(
     mismatches: list[dict[str, Any]] = []
 
     for raw, num in found:
-        is_valid = False
-        for allowed in allowed_values:
-            if allowed == 0:
-                if abs(num - allowed) <= ROUNDING_TOLERANCE:
-                    is_valid = True
-                    break
-            else:
-                # Relative tolerance for non-zero values
-                if abs(num - allowed) / abs(allowed) <= ROUNDING_TOLERANCE:
-                    is_valid = True
-                    break
-        if not is_valid:
+        if not any(_is_grounded(num, allowed) for allowed in allowed_values):
             mismatches.append({"raw": raw, "value": num})
 
     return len(mismatches) == 0, mismatches

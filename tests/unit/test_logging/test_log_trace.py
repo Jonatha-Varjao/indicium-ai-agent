@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import uuid
 from unittest.mock import MagicMock, patch
 
 from indicium_ai_agent.logging.log_trace import (
@@ -64,7 +65,9 @@ def test_log_trace_includes_run_id_in_trace_context() -> None:
         log_langfuse_trace(_minimal_state())
 
         call_kwargs = mock_client.start_as_current_observation.call_args.kwargs
-        assert call_kwargs["trace_context"]["id"] == "test-run-001"
+        expected_id = uuid.uuid5(uuid.NAMESPACE_OID, "test-run-001").hex
+        assert call_kwargs["trace_context"]["id"] == expected_id
+        assert call_kwargs["trace_context"]["trace_id"] == expected_id
 
 
 def test_log_trace_includes_metadata() -> None:

@@ -24,6 +24,93 @@ def test_canonicalize_number_invalid() -> None:
     assert canonicalize_number("abc") is None
 
 
+# --- PT-BR conventions (regressions from real pipeline run) ------------------
+
+
+def test_canonicalize_number_thousands_separator() -> None:
+    """Dot-grouped integers are PT-BR thousands, not decimals."""
+    assert canonicalize_number("7.485") == 7485.0
+    assert canonicalize_number("129.373") == 129373.0
+    assert canonicalize_number("161.360") == 161360.0
+
+
+def test_canonicalize_number_leading_zero_is_decimal() -> None:
+    """'0.154' can never be a count — leading block '0' forces decimal."""
+    assert canonicalize_number("0.154") == 0.154
+    assert canonicalize_number("0.0579") == 0.0579
+
+
+def test_canonicalize_number_mixed_thousands_decimal() -> None:
+    assert canonicalize_number("1.234,56") == 1234.56
+
+
+def test_numeric_grounding_accepts_ptbr_counts() -> None:
+    """Counts cited with thousand separators must ground on numerators."""
+    narrative = (
+        "Foram 7.485 óbitos em 129.373 casos resolvidos, com "
+        "40.884 admissões em UTI."
+    )
+    metrics = {
+        "mortality_rate": {
+            "computable": True,
+            "value": 0.0579,
+            "numerator": 7485,
+            "denominator": 129373,
+        },
+        "uti_admission_rate": {
+            "computable": True,
+            "value": 0.2534,
+            "numerator": 40884,
+            "denominator": 161360,
+        },
+    }
+    ok, diffs = check_numeric_grounding(narrative, metrics)
+    assert ok is True, diffs
+
+
+def test_numeric_grounding_accepts_negative_magnitude() -> None:
+    """Negative rates phrased as reduction magnitudes must pass."""
+    narrative = "Houve redução de 78,12% nos casos."
+    metrics = {
+        "case_growth_rate": {"computable": True, "value": -78.12},
+    }
+    ok, diffs = check_numeric_grounding(narrative, metrics)
+    assert ok is True, diffs
+
+
+def test_extract_skips_prose_noise() -> None:
+    """Ordinals, COVID-19 codes, prose dates and durations aren't values."""
+    from indicium_ai_agent.narrative.validate import _extract_all_numbers
+
+    text = (
+        "Em 1º de janeiro e 20 de julho de 2026, casos de COVID-19 "
+        "caíram ao longo de 7 dias."
+    )
+    assert _extract_all_numbers(text) == []
+
+
+def test_extract_skips_prose_date_and_duration_ranges() -> None:
+    """Ranges ('entre 13 e 20 de julho', '7 a 14 dias') aren't values."""
+    from indicium_ai_agent.narrative.validate import _extract_all_numbers
+
+    text = (
+        "variação entre 13 e 20 de julho de 2026; "
+        "dados dos últimos 7 a 14 dias podem estar sujeitos a subnotificação."
+    )
+    assert _extract_all_numbers(text) == []
+
+
+def test_numeric_grounding_still_catches_invention() -> None:
+    """Genuine hallucinated stats must remain blocked."""
+    narrative = "A mortalidade saltou para 42.7% no período."
+    metrics = {
+        "mortality_rate": {"computable": True, "value": 0.0579},
+    }
+    ok, diffs = check_numeric_grounding(narrative, metrics)
+    assert ok is False
+    assert diffs[0]["raw"] == "42.7%"
+
+
 def test_numeric_grounding_passes() -> None:
     narrative = "A taxa de aumento foi de 15.5%."
     metrics = {
