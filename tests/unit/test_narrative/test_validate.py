@@ -78,6 +78,68 @@ def test_numeric_grounding_accepts_negative_magnitude() -> None:
     assert ok is True, diffs
 
 
+def test_numeric_grounding_rejects_wrong_direction() -> None:
+    """Opposite trend wording must NOT ground a negative metric.
+
+    Review regression: sign-blind abs() matching accepted
+    'aumento de 78,12%' for value -78.12, publishing the opposite
+    epidemiological trend as validated.
+    """
+    narrative = "Houve aumento de 78,12% nos casos."
+    metrics = {
+        "case_growth_rate": {"computable": True, "value": -78.12},
+    }
+    ok, diffs = check_numeric_grounding(narrative, metrics)
+    assert ok is False
+    assert diffs and diffs[0]["raw"] == "78,12%"
+
+
+def test_numeric_grounding_accepts_signed_literal_without_direction_word() -> None:
+    """Explicit '-N' literals carry their own sign; no verb needed."""
+    narrative = "observou-se variação de -78,1200 na taxa de casos."
+    metrics = {
+        "case_growth_rate": {"computable": True, "value": -78.12},
+    }
+    ok, diffs = check_numeric_grounding(narrative, metrics)
+    assert ok is True, diffs
+
+
+def test_unsupported_duration_is_grounded_not_skipped() -> None:
+    """Review regression: '999 dias' previously bypassed grounding."""
+    from indicium_ai_agent.narrative.validate import _extract_all_numbers
+
+    text = "pacientes com internação média de 999 dias."
+    extracted = _extract_all_numbers(text)
+    assert ("999", 999.0, extracted[0][2]) in extracted
+
+    metrics = {
+        "mortality_rate": {"computable": True, "value": 0.0579},
+    }
+    ok, diffs = check_numeric_grounding(text, metrics)
+    assert ok is False
+    assert any(d["raw"] == "999" for d in diffs)
+
+
+def test_supported_duration_range_still_skipped() -> None:
+    """Documented windows (7 / 14 days) remain contextual."""
+    from indicium_ai_agent.narrative.validate import _extract_all_numbers
+
+    text = (
+        "dados entre 13 e 20 de julho; últimos 7 a 14 dias "
+        "sujeitos a subnotificação."
+    )
+    assert _extract_all_numbers(text) == []
+
+
+def test_unsupported_duration_range_surfaces_both_bounds() -> None:
+    """'3 a 5 dias' fabricates quantities — both bounds must be checked."""
+    from indicium_ai_agent.narrative.validate import _extract_all_numbers
+
+    text = "tempo de internação variando de 3 a 5 dias."
+    raws = {raw for raw, _v, _s in _extract_all_numbers(text)}
+    assert {"3", "5"} <= raws
+
+
 def test_extract_skips_prose_noise() -> None:
     """Ordinals, COVID-19 codes, prose dates and durations aren't values."""
     from indicium_ai_agent.narrative.validate import _extract_all_numbers

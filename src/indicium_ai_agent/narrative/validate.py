@@ -5,7 +5,11 @@ from __future__ import annotations
 import re
 from typing import Any, Final
 
-from indicium_ai_agent.config.constants import MAX_RETRIES, METRIC_KEYS
+from indicium_ai_agent.config.constants import (
+    KNOWN_DURATION_DAYS,
+    MAX_RETRIES,
+    METRIC_KEYS,
+)
 from indicium_ai_agent.narrative._utils import coerce_content_to_str
 
 # Tolerance for numeric grounding: 1% relative for non-zero, absolute for zero.
@@ -66,8 +70,22 @@ def canonicalize_number(text: str) -> float | None:
         return None
 
 
-def _extract_all_numbers(text: str) -> list[tuple[str, float]]:
-    """Extract numeric tokens, filtering non-quantitative contexts.
+def _is_documented_year(raw: str) -> bool:
+    """Plain 4-digit year 1900-2100 without a ``%`` sign."""
+    if "%" in raw or not re.fullmatch(r"\d{4}", raw):
+        return False
+    return 1900 <= int(raw) <= 2100
+
+
+def _is_documented_duration(num: float, tail: str) -> bool:
+    """Duration token referencing a documented methodology window (7/14)."""
+    if not _DURATION_CONTEXT.match(tail):
+        return False
+    return num.is_integer() and int(abs(num)) in KNOWN_DURATION_DAYS
+
+
+def _extract_all_numbers(text: str) -> list[tuple[str, float, int]]:
+    """Extract numeric tokens with spans, filtering non-quantitative contexts.
 
     Skips tokens that are structurally not metric values:
     - components of slash-dates (``20/07/2026``)
@@ -75,16 +93,19 @@ def _extract_all_numbers(text: str) -> list[tuple[str, float]]:
     - ordinals (``1º``)
     - letter-hyphen codes (the ``19`` in ``COVID-19``)
     - prose dates (number followed by a month name)
-    - day-duration references (``7 dias``, matching documented windows)
+    - durations matching documented windows only (7 / 14 days); any
+      other "N dias" claim stays in the list for grounding
+
+    Signed literals keep their sign (``-78,12`` -> -78.12).
 
     Args:
         text: Narrative text to scan.
 
     Returns:
-        List of (raw, value) tuples for grounded numbers.
+        List of ``(raw, value, start_index)`` tuples.
     """
     pattern = r"(?<!\d)\d+(?:[.,]\d+)?%?(?!\d)"
-    matches: list[tuple[str, float]] = []
+    matches: list[tuple[str, float, int]] = []
     for match in re.finditer(pattern, text):
         raw = match.group()
         start, end = match.span()
@@ -99,18 +120,19 @@ def _extract_all_numbers(text: str) -> list[tuple[str, float]]:
         # Letter-hyphen codes: the "19" in "COVID-19"
         if before == "-" and start >= 2 and text[start - 2].isalpha():
             continue
-        # Prose dates and durations
-        tail = text[end:]
-        if _DATE_CONTEXT.match(tail) or _DURATION_CONTEXT.match(tail):
+        if _is_documented_year(raw):
             continue
-        # Plain 4-digit years 1900-2100 when not a percentage
-        if "%" not in raw and re.fullmatch(r"\d{4}", raw):
-            year = int(raw)
-            if 1900 <= year <= 2100:
-                continue
         num = canonicalize_number(raw)
-        if num is not None:
-            matches.append((raw, num))
+        if num is None:
+            continue
+        # Explicit signed literal: "-78,12" carries its own sign
+        if before == "-":
+            num = -num
+        tail = text[end:]
+        # Prose dates stay contextual (calendar facts, not quantities)
+        if _DATE_CONTEXT.match(tail) or _is_documented_duration(num, tail):
+            continue
+        matches.append((raw, num, start))
     return matches
 
 
@@ -145,17 +167,53 @@ def _get_metric_values(metrics: dict[str, Any]) -> list[float]:
     return values
 
 
-def _is_grounded(num: float, allowed: float) -> bool:
-    """Sign-agnostic tolerance check.
+_DECREASE_WORDS: Final[tuple[str, ...]] = (
+    "redução", "queda", "diminuição", "declínio", "recuo",
+    "caída", "caiu", "reduziu", "diminuiu", "desceu", "menor",
+)
+_INCREASE_WORDS: Final[tuple[str, ...]] = (
+    "aumento", "alta", "crescimento", "elevação", "subida",
+    "subiu", "aumentou", "cresceu", "maior",
+)
 
-    Magnitude comparison: an LLM legitimately phrases negative rates as
-    positive magnitudes ("redução de 78,12%" for -78.12), so the sign
-    carries meaning in words while the number itself is grounded.
-    """
-    diff = abs(abs(num) - abs(allowed))
+# How many chars before a token to look for the direction word
+_DIRECTION_WINDOW: Final[int] = 48
+
+
+def _within_tolerance(num: float, allowed: float) -> bool:
+    """Numeric tolerance only (sign-sensitive): absolute for zero."""
+    diff = abs(num - allowed)
     if allowed == 0:
         return diff <= ROUNDING_TOLERANCE
     return diff / abs(allowed) <= ROUNDING_TOLERANCE
+
+
+def _is_grounded(num: float, allowed: float, context: str) -> bool:
+    """Direction-aware grounding check.
+
+    1. Signed match within tolerance always passes.
+    2. Opposite-sign magnitude passes ONLY when the preceding prose
+       carries the direction word implied by the metric's sign
+       ("redução/queda..." for negative metrics). This blocks publishing
+       the opposite epidemiological trend ("aumento de 78,12%" for
+       -78.12) while accepting legitimate reduction phrasing.
+
+    Args:
+        num: Token value with its literal sign.
+        allowed: Metric value to ground against.
+        context: Lowercased text immediately before the token.
+
+    Returns:
+        Whether the token is grounded on ``allowed``.
+    """
+    if _within_tolerance(num, allowed):
+        return True
+    if num == 0 or allowed == 0:
+        return False
+    if _within_tolerance(abs(num), abs(allowed)):
+        words = _DECREASE_WORDS if allowed < 0 else _INCREASE_WORDS
+        return any(word in context for word in words)
+    return False
 
 
 def check_numeric_grounding(
@@ -164,7 +222,8 @@ def check_numeric_grounding(
 ) -> tuple[bool, list[dict[str, Any]]]:
     """Check that every number in the narrative is grounded in metrics.
 
-    Uses single tolerance strategy: absolute for zero, relative for non-zero.
+    Sign-sensitive tolerance; opposite-sign magnitudes require the
+    direction word implied by the metric sign in the nearby prose.
 
     Args:
         narrative: Narrative text to validate.
@@ -177,8 +236,9 @@ def check_numeric_grounding(
     found = _extract_all_numbers(narrative)
     mismatches: list[dict[str, Any]] = []
 
-    for raw, num in found:
-        if not any(_is_grounded(num, allowed) for allowed in allowed_values):
+    for raw, num, start in found:
+        context = narrative[max(0, start - _DIRECTION_WINDOW):start].lower()
+        if not any(_is_grounded(num, allowed, context) for allowed in allowed_values):
             mismatches.append({"raw": raw, "value": num})
 
     return len(mismatches) == 0, mismatches

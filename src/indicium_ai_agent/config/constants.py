@@ -15,6 +15,12 @@ METRIC_KEYS: Final[tuple[str, ...]] = (
 # Max validation retries — used by narrative/validate.py and graph.py
 MAX_RETRIES: Final[int] = 3
 
+# Duration values the narrative may cite without numeric grounding:
+# they come from documented methodology text, not computed data.
+# - 7: rolling case-growth window (DEFAULT_GROWTH_DAYS semantics)
+# - 14: sub-notification caveat upper bound ("últimos ~7-14 dias")
+KNOWN_DURATION_DAYS: Final[frozenset[int]] = frozenset({7, 14})
+
 # Chart rendering defaults
 CHART_FIGSIZE: Final[tuple[int, int]] = (10, 4)
 CHART_DPI: Final[int] = 150
