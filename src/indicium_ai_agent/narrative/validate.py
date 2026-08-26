@@ -88,6 +88,41 @@ def _is_documented_year(raw: str) -> bool:
     return 1900 <= int(raw) <= 2100
 
 
+_CLINICAL_DURATION_WORDS: Final[frozenset[str]] = frozenset(
+    {
+        "internação",
+        "internacao",
+        "internações",
+        "internacoes",
+        "hospitalização",
+        "hospitalizacao",
+        "hospitalizações",
+        "hospitalizacoes",
+        "febre",
+        "tratamento",
+        "tratamentos",
+        "sintomas",
+        "sintoma",
+        "doença",
+        "doenca",
+        "doenças",
+        "doencas",
+        "enfermaria",
+        "uti",
+        "utis",
+        "estadia",
+        "permanência",
+        "permanencia",
+        "recuperação",
+        "recuperacao",
+        "isolamento",
+        "isolamentos",
+        "quarentena",
+        "quarentenas",
+    }
+)
+
+
 def _is_documented_duration(num: float, tail: str, before_context: str) -> bool:
     """Duration token referencing a documented methodology window (7/14/30).
 
@@ -96,9 +131,10 @@ def _is_documented_duration(num: float, tail: str, before_context: str) -> bool:
     ("últimos 7 dias", "próximos 14 dias", "período de 7 a 14 dias").
     Bare clinical claims like "internação média de 7 dias" do NOT match
     and stay subject to numeric grounding. Even with a valid anchor,
-    a trailing prepositional continuation ("7 dias de internação",
+    a trailing clinical qualifier ("7 dias de internação",
     "7 dias na UTI", "7 dias de longa internação") indicates a
-    fabricated clinical duration and is NOT exempt.
+    fabricated clinical duration and is NOT exempt, while methodology
+    continuations ("7 dias de observação") remain exempt.
 
     Args:
         num: Token value with sign.
@@ -115,17 +151,22 @@ def _is_documented_duration(num: float, tail: str, before_context: str) -> bool:
         return False
     if _DURATION_ANCHOR_RE.search(before_context) is None:
         return False
-    # Methodology windows end at "dias" (punctuation / end of clause).
-    # A trailing prepositional continuation ("dias de ...", "dias na ...",
-    # "dias em ...") signals a clinical duration claim
-    # (e.g. "7 dias de internação", "7 dias na UTI",
-    # "7 dias de longa internação", "7 dias de isolamento") and must
-    # be grounded, not silently exempt.
+    # A trailing prepositional continuation with a clinical noun
+    # (e.g. "dias de internação", "dias na UTI",
+    # "dias de longa internação") signals a clinical duration claim
+    # and must be grounded. Methodology continuations like
+    # "dias de observação" (observação not in clinical set) remain exempt.
     remaining = tail[m.end():].lstrip().lower()
     if remaining.startswith(
         ("de ", "da ", "do ", "das ", "dos ", "na ", "no ", "nas ", "nos ", "em ", "com ", "para ")
     ):
-        return False
+        # Check next 1-2 words after preposition for clinical terms,
+        # handling modifiers like "de longa internação"
+        after_prep = remaining.split(None, 1)[1] if " " in remaining else ""
+        for w in after_prep.split()[:2]:
+            clean = w.strip(".,;").lower()
+            if clean in _CLINICAL_DURATION_WORDS:
+                return False
     return True
 
 
@@ -246,15 +287,16 @@ _DIRECTION_RE: Final[re.Pattern[str]] = re.compile(
     )
     + r")\b"
 )
-# Immediate direction phrase: word + "de" directly before the number
-# ("queda de 78,12%", "aumento de -78,12%"). Prevents distant words
-# like "Após queda anterior, mortalidade de 0,0579" from misgrounding.
+# Immediate direction phrase: word + "de" directly before the number,
+# allowing 0-2 modifiers ("queda anual de 78,12%"). Prevents distant
+# words like "Após queda anterior, mortalidade de 0,0579" from
+# misgrounding while still catching phrasing variants.
 _IMMEDIATE_DIRECTION_RE: Final[re.Pattern[str]] = re.compile(
     r"(?i)\b("
     + "|".join(
         sorted((*_DECREASE_WORDS, *_INCREASE_WORDS), key=len, reverse=True)
     )
-    + r")\s+de\s*$"
+    + r")(?:\s+\w+){0,2}\s+de\s*$"
 )
 _DECREASE_SET: Final[frozenset[str]] = frozenset(_DECREASE_WORDS)
 
