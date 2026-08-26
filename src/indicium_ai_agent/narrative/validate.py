@@ -35,13 +35,15 @@ _DATE_CONTEXT: Final[re.Pattern[str]] = re.compile(
 _DURATION_CONTEXT: Final[re.Pattern[str]] = re.compile(
     r"\s*(?:a\s+\d+)?\s*dias?\b", re.IGNORECASE
 )
-# Methodology anchors that legitimise a window reference; must appear
-# within the short window before the token. Only explicitly methodological
-# frames are allowed — generic clinical framings ("durante 7 dias",
-# "ao longo de 7 dias") are NOT exempt and stay subject to grounding.
+# Methodology anchors that legitimise a window reference.
+# The anchor must be immediately adjacent to the duration token (or its
+# range predecessor), not merely anywhere in the preceding window.
+# This prevents leakage: "nos últimos 30 dias, 7 dias de internação"
+# must NOT exempt the second "7 dias" (anchor "últimos" is followed by
+# an intervening "30 dias," -> not adjacent).
 _DURATION_ANCHOR_RE: Final[re.Pattern[str]] = re.compile(
     r"(?:últim[oa]s|ultimos|próxim[oa]s|proximos|per[íi]odo(?:\s+de)?|"
-    r"janela(?:\s+de)?)\s+[^.;]{0,20}$",
+    r"janela(?:\s+de)?)(?:\s+\d+\s*a)?\s*$",
     re.IGNORECASE,
 )
 

@@ -186,6 +186,25 @@ def test_generic_clinical_durante_not_exempt() -> None:
         assert ok is False, f"should flag clinical {text!r}: diffs={diffs}"
 
 
+def test_duration_anchor_does_not_leak_through_intervening_phrase() -> None:
+    """Review regression: 'nos últimos 30 dias, 7 dias de internação'
+    must NOT exempt the second '7 dias' (anchor belongs to '30 dias')."""
+    from indicium_ai_agent.narrative.validate import _extract_all_numbers
+
+    cases = [
+        "nos últimos 30 dias, 7 dias de internação",
+        "no período de estudo, 7 dias de febre",
+    ]
+    for text in cases:
+        extracted = _extract_all_numbers(text)
+        raws = {raw for raw, _v, _s in extracted}
+        assert "7" in raws, f"should surface clinical 7 in {text!r}, got {raws}"
+        metrics = {"mortality_rate": {"computable": True, "value": 0.0579}}
+        ok, diffs = check_numeric_grounding(text, metrics)
+        assert ok is False, f"should flag {text!r}"
+        assert any(d["raw"] == "7" for d in diffs), text
+
+
 def test_numeric_grounding_accepts_signed_literal_without_direction_word() -> None:
     """Explicit '-N' literals carry their own sign; no verb needed."""
     narrative = "observou-se variação de -78,1200 na taxa de casos."
