@@ -19,7 +19,8 @@ MAX_RETRIES: Final[int] = 3
 # they come from documented methodology text, not computed data.
 # - 7: rolling case-growth window (DEFAULT_GROWTH_DAYS semantics)
 # - 14: sub-notification caveat upper bound ("últimos ~7-14 dias")
-KNOWN_DURATION_DAYS: Final[frozenset[int]] = frozenset({7, 14})
+# - 30: daily chart window (últimos 30 dias)
+KNOWN_DURATION_DAYS: Final[frozenset[int]] = frozenset({7, 14, 30})
 
 # Chart rendering defaults
 CHART_FIGSIZE: Final[tuple[int, int]] = (10, 4)
