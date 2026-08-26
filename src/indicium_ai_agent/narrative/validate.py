@@ -407,32 +407,27 @@ _METRIC_KEYWORDS: Final[frozenset[str]] = frozenset(
 )
 
 
-def _nearby_direction_word(context: str, window: int = 48) -> str | None:
-    """Nearest direction word within *window* chars before the token.
+def _nearby_direction_word(context: str) -> str | None:
+    """Nearest direction word in *context* before the token.
 
-    Skips words separated by sentence boundaries (.,;) or by an
-    intervening metric keyword (e.g. "queda anterior, mortalidade de
-    0,0579" — "queda" describes a previous event, not the current
-    number). This prevents distant misattribution while still catching
-    long phrasing like "queda muito acentuada anual de 78,12%".
+    Uses the full preserved context (48 chars) and only skips words
+    separated by sentence boundaries (.,;) or by an intervening metric
+    keyword that indicates a different clause (e.g. "queda anterior,
+    mortalidade de 0,0579"). Long modifiers like
+    "queda muito acentuada anual de 78,12%" are correctly handled
+    because no metric keyword intervenes.
 
     Args:
         context: Lowercased text window before the token (up to 48 chars).
-        window: Max chars to look back (48 covers long modifiers).
 
     Returns:
         Direction word or None.
     """
-    snippet = context[-window:] if len(context) > window else context
-    # Find all candidates and pick the nearest without intervening metric
-    # keyword or sentence boundary between word and number
     last: str | None = None
-    for match in _DIRECTION_RE.finditer(snippet):
-        between = snippet[match.end():].lower()
+    for match in _DIRECTION_RE.finditer(context):
+        between = context[match.end():].lower()
         if any(c in between for c in ".;"):
             continue
-        # If a metric keyword appears between direction word and number,
-        # the word likely describes a different metric
         if any(kw in between for kw in _METRIC_KEYWORDS):
             continue
         last = match.group().lower()
