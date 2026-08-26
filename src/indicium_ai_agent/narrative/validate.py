@@ -88,41 +88,16 @@ def _is_documented_year(raw: str) -> bool:
     return 1900 <= int(raw) <= 2100
 
 
-_CLINICAL_SUFFIX_WORDS: Final[frozenset[str]] = frozenset(
-    {
-        "internação",
-        "internacao",
-        "internações",
-        "internacoes",
-        "hospitalização",
-        "hospitalizacao",
-        "hospitalizações",
-        "hospitalizacoes",
-        "febre",
-        "tratamento",
-        "sintomas",
-        "doença",
-        "doenca",
-        "enfermaria",
-        "uti",
-        "estadia",
-        "permanência",
-        "permanencia",
-        "recuperação",
-        "recuperacao",
-    }
-)
-
-
 def _is_documented_duration(num: float, tail: str, before_context: str) -> bool:
-    """Duration token referencing a documented methodology window (7/14).
+    """Duration token referencing a documented methodology window (7/14/30).
 
     Exemption requires BOTH the value to be a known window AND an
     anchoring methodology phrase immediately before the token
     ("últimos 7 dias", "próximos 14 dias", "período de 7 a 14 dias").
     Bare clinical claims like "internação média de 7 dias" do NOT match
     and stay subject to numeric grounding. Even with a valid anchor,
-    a trailing clinical qualifier ("7 dias de internação") indicates a
+    a trailing prepositional continuation ("7 dias de internação",
+    "7 dias na UTI", "7 dias de longa internação") indicates a
     fabricated clinical duration and is NOT exempt.
 
     Args:
@@ -140,14 +115,17 @@ def _is_documented_duration(num: float, tail: str, before_context: str) -> bool:
         return False
     if _DURATION_ANCHOR_RE.search(before_context) is None:
         return False
-    # Generic anchor + clinical suffix (e.g. "período de 7 dias de
-    # internação") is a fabricated clinical duration, not a methodology
-    # window, so it must be grounded.
+    # Methodology windows end at "dias" (punctuation / end of clause).
+    # A trailing prepositional continuation ("dias de ...", "dias na ...",
+    # "dias em ...") signals a clinical duration claim
+    # (e.g. "7 dias de internação", "7 dias na UTI",
+    # "7 dias de longa internação", "7 dias de isolamento") and must
+    # be grounded, not silently exempt.
     remaining = tail[m.end():].lstrip().lower()
-    if remaining.startswith("de "):
-        next_word = remaining[3:].split()[0].strip(".,;") if len(remaining) > 3 else ""
-        if next_word in _CLINICAL_SUFFIX_WORDS:
-            return False
+    if remaining.startswith(
+        ("de ", "da ", "do ", "das ", "dos ", "na ", "no ", "nas ", "nos ", "em ", "com ", "para ")
+    ):
+        return False
     return True
 
 

@@ -186,6 +186,25 @@ def test_generic_clinical_durante_not_exempt() -> None:
         assert ok is False, f"should flag clinical {text!r}: diffs={diffs}"
 
 
+def test_anchored_clinical_suffix_not_exempt() -> None:
+    """Review regression: anchored 'período de 7 dias de internação' and
+    variants with prepositions/modifiers/unlisted nouns must be grounded."""
+    from indicium_ai_agent.narrative.validate import _extract_all_numbers
+
+    for text in (
+        "pacientes tiveram período de 7 dias de internação",
+        "período de 7 dias na UTI",
+        "período de 7 dias de longa internação",
+        "período de 7 dias de isolamento",
+    ):
+        extracted = _extract_all_numbers(text)
+        assert any(raw == "7" for raw, _v, _s in extracted), text
+        metrics = {"mortality_rate": {"computable": True, "value": 0.0579}}
+        ok, diffs = check_numeric_grounding(text, metrics)
+        assert ok is False, f"should flag clinical {text!r}"
+        assert any(d["raw"] == "7" for d in diffs), text
+
+
 def test_duration_anchor_does_not_leak_through_intervening_phrase() -> None:
     """Review regression: 'nos últimos 30 dias, 7 dias de internação'
     must NOT exempt the second '7 dias' (anchor belongs to '30 dias')."""
