@@ -386,20 +386,39 @@ def _immediate_direction_word(context: str) -> str | None:
     return None
 
 
+def _nearby_direction_word(context: str, window: int = 30) -> str | None:
+    """Nearest direction word within *window* chars before the token,
+    ignoring words separated by sentence boundaries (.,;).
+
+    Prevents distant words like "Após queda anterior, mortalidade de
+    0,0579" from misattributing, while still catching free-form
+    phrasing like "queda no total, 78,12%".
+
+    Args:
+        context: Lowercased text window before the token.
+        window: Max chars to look back.
+
+    Returns:
+        Direction word or None.
+    """
+    snippet = context[-window:] if len(context) > window else context
+    last: str | None = None
+    for match in _DIRECTION_RE.finditer(snippet):
+        between = snippet[match.end():]
+        if any(c in between for c in ".;"):
+            continue
+        last = match.group().lower()
+    return last
+
+
 def _is_grounded(num: float, allowed: float, context: str) -> bool:
     """Direction-aware grounding check.
 
-    Signed and magnitude matches are both direction-checked: when a
-    direction word is present nearest the token, its polarity must match
-    the sign of the metric. This prevents publishing a reversed trend
-    (e.g. "queda de 78,12%" for +78.12 or "aumento de -78,12%" for
-    -78.12) as validated.
-
-    1. Signed match: passes only if no direction word contradicts the
-       metric sign. If a direction word is present, its polarity must
-       match the metric sign.
-    2. Opposite-sign magnitude: passes only when the nearest direction
-       word carries the polarity implied by the metric sign.
+    Signed matches are checked against the nearest direction word within
+    a bounded window (free-form wording like "queda no total, 78,12%"
+    still validates), while opposite-sign magnitudes require an
+    immediate "<word> de" phrase. This balances catching reversed
+    trends against distant-word misattribution.
 
     Args:
         num: Token value with its literal sign.
@@ -410,10 +429,10 @@ def _is_grounded(num: float, allowed: float, context: str) -> bool:
         Whether the token is grounded on ``allowed``.
     """
     if _within_tolerance(num, allowed):
-        immediate = _immediate_direction_word(context)
-        if immediate is not None:
+        nearby = _nearby_direction_word(context)
+        if nearby is not None:
             expected_decrease = allowed < 0
-            is_decrease = immediate in _DECREASE_SET
+            is_decrease = nearby in _DECREASE_SET
             if expected_decrease != is_decrease:
                 return False
         return True
