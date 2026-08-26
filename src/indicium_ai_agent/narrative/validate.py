@@ -94,10 +94,18 @@ _CLINICAL_DURATION_WORDS: Final[frozenset[str]] = frozenset(
         "internacao",
         "internações",
         "internacoes",
+        "internado",
+        "internados",
+        "internada",
+        "internadas",
         "hospitalização",
         "hospitalizacao",
         "hospitalizações",
         "hospitalizacoes",
+        "hospitalizado",
+        "hospitalizados",
+        "hospitalizada",
+        "hospitalizadas",
         "febre",
         "tratamento",
         "tratamentos",
@@ -121,6 +129,8 @@ _CLINICAL_DURATION_WORDS: Final[frozenset[str]] = frozenset(
         "quarentenas",
         "ventilação",
         "ventilacao",
+        "ventilacoes",
+        "ventilacões",
     }
 )
 
@@ -188,21 +198,22 @@ def _is_documented_duration(num: float, tail: str, before_context: str) -> bool:
     # and must be grounded. Methodology continuations like
     # "dias de observação" (observação not in clinical set) remain exempt.
     remaining = tail[m.end():].lstrip().lower()
+    # Direct clinical suffix without preposition (e.g. "7 dias internado")
+    if remaining:
+        first_word = remaining.split()[0].strip(".,;").lower()
+        if first_word in _CLINICAL_DURATION_WORDS:
+            return False
     if remaining.startswith(
         ("de ", "da ", "do ", "das ", "dos ", "na ", "no ", "nas ", "nos ", "em ", "com ", "para ")
     ):
-        # A prepositional continuation after "dias" is clinical by default
-        # (e.g. "7 dias de internação", "7 dias na UTI",
-        # "7 dias de ventilação mecânica") and must be grounded.
-        # Only methodology continuations like "dias de observação" remain
-        # exempt — check next 1-2 words against the methodology allowlist.
-        # Clinical takes priority: any clinical noun in the continuation
-        # (e.g. "de observação em internação" -> "internação") must be
-        # grounded, even if a methodology word also appears.
-        words = re.findall(r"\b\w+\b", remaining.lower())
+        # Bounded check: only next 4 words after "dias" determine
+        # clinical vs methodology. Prevents unrelated later clauses like
+        # "de observação. Pacientes com internação" from invalidating
+        # a legitimate window.
+        words = re.findall(r"\b\w+\b", remaining.lower())[:4]
         if any(w in _CLINICAL_DURATION_WORDS for w in words):
             return False
-        if any(w in _METHODOLOGY_DURATION_WORDS for w in words[:3]):
+        if any(w in _METHODOLOGY_DURATION_WORDS for w in words):
             return True
         return False
     return True
