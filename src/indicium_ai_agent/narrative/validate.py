@@ -206,11 +206,14 @@ def _is_documented_duration(num: float, tail: str, before_context: str) -> bool:
     if remaining.startswith(
         ("de ", "da ", "do ", "das ", "dos ", "na ", "no ", "nas ", "nos ", "em ", "com ", "para ")
     ):
-        # Bounded check: only next 4 words after "dias" determine
-        # clinical vs methodology. Prevents unrelated later clauses like
-        # "de observação. Pacientes com internação" from invalidating
-        # a legitimate window.
-        words = re.findall(r"\b\w+\b", remaining.lower())[:4]
+        # Check the current sentence's continuation after "dias" (up to
+        # next period) for clinical vs methodology. This catches long
+        # mixed continuations like "de observação em internação
+        # prolongada" where the clinical noun is beyond 4 words, while
+        # not letting unrelated later sentences invalidate a legitimate
+        # window (e.g. "de observação. Pacientes com internação").
+        chunk = remaining.split(".")[0].split(";")[0]
+        words = re.findall(r"\b\w+\b", chunk.lower())
         if any(w in _CLINICAL_DURATION_WORDS for w in words):
             return False
         if any(w in _METHODOLOGY_DURATION_WORDS for w in words):
