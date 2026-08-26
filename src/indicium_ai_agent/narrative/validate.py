@@ -229,6 +229,16 @@ _DIRECTION_RE: Final[re.Pattern[str]] = re.compile(
     )
     + r")\b"
 )
+# Immediate direction phrase: word + "de" directly before the number
+# ("queda de 78,12%", "aumento de -78,12%"). Prevents distant words
+# like "Após queda anterior, mortalidade de 0,0579" from misgrounding.
+_IMMEDIATE_DIRECTION_RE: Final[re.Pattern[str]] = re.compile(
+    r"(?i)\b("
+    + "|".join(
+        sorted((*_DECREASE_WORDS, *_INCREASE_WORDS), key=len, reverse=True)
+    )
+    + r")\s+de\s*$"
+)
 _DECREASE_SET: Final[frozenset[str]] = frozenset(_DECREASE_WORDS)
 
 # How many chars before a token to look for the direction word
@@ -259,15 +269,43 @@ def _nearest_direction_word(context: str) -> str | None:
     return last
 
 
+def _immediate_direction_word(context: str) -> str | None:
+    """Return direction word if it immediately precedes the number
+    as ``<word> de`` (e.g. "queda de 78,12%").
+
+    Handles signed literals like "aumento de -78,12%" where the
+    context ends with "de -" — the trailing dash/space is stripped
+    before matching. Prevents distant words like "Após queda
+    anterior, mortalidade de 0,0579" from being misattributed.
+
+    Args:
+        context: Lowercased text immediately before the token.
+
+    Returns:
+        The direction word or None.
+    """
+    # Strip trailing dash left by signed literals ("de -" -> "de")
+    stripped = context.rstrip(" \t\n\r-")
+    m = _IMMEDIATE_DIRECTION_RE.search(stripped)
+    if m:
+        return m.group(1).lower()
+    return None
+
+
 def _is_grounded(num: float, allowed: float, context: str) -> bool:
     """Direction-aware grounding check.
 
-    1. Signed match within tolerance always passes.
-    2. Opposite-sign magnitude passes ONLY when the direction word
-       NEAREST the token carries the polarity implied by the metric's
-       sign ("redução/queda..." for negative metrics). A nearer
-       conflicting word ("...queda anterior; aumento de 78,12%") wins,
-       so opposite trends can never be grounded by an earlier clause.
+    Signed and magnitude matches are both direction-checked: when a
+    direction word is present nearest the token, its polarity must match
+    the sign of the metric. This prevents publishing a reversed trend
+    (e.g. "queda de 78,12%" for +78.12 or "aumento de -78,12%" for
+    -78.12) as validated.
+
+    1. Signed match: passes only if no direction word contradicts the
+       metric sign. If a direction word is present, its polarity must
+       match the metric sign.
+    2. Opposite-sign magnitude: passes only when the nearest direction
+       word carries the polarity implied by the metric sign.
 
     Args:
         num: Token value with its literal sign.
@@ -278,16 +316,23 @@ def _is_grounded(num: float, allowed: float, context: str) -> bool:
         Whether the token is grounded on ``allowed``.
     """
     if _within_tolerance(num, allowed):
+        immediate = _immediate_direction_word(context)
+        if immediate is not None:
+            expected_decrease = allowed < 0
+            is_decrease = immediate in _DECREASE_SET
+            if expected_decrease != is_decrease:
+                return False
         return True
     if num == 0 or allowed == 0:
         return False
     if not _within_tolerance(abs(num), abs(allowed)):
         return False
-    nearest = _nearest_direction_word(context)
+    # Opposite-sign magnitude requires immediate direction word
+    immediate = _immediate_direction_word(context)
     if allowed < 0:
-        return nearest is not None and nearest in _DECREASE_SET
+        return immediate is not None and immediate in _DECREASE_SET
     # allowed > 0: magnitude of a positive metric must read as increase
-    return nearest is not None and nearest not in _DECREASE_SET
+    return immediate is not None and immediate not in _DECREASE_SET
 
 
 def _collect_news_numbers(news_items: list[dict[str, str]] | None) -> frozenset[float]:
