@@ -198,13 +198,33 @@ def _is_documented_duration(num: float, tail: str, before_context: str) -> bool:
     # and must be grounded. Methodology continuations like
     # "dias de observação" (observação not in clinical set) remain exempt.
     remaining = tail[m.end():].lstrip().lower()
-    # Direct clinical suffix without preposition (e.g. "7 dias internado")
+    # Direct clinical suffix without preposition (e.g. "7 dias internado",
+    # "7 dias muito internado") — check first 2 words after "dias"
     if remaining:
-        first_word = remaining.split()[0].strip(".,;").lower()
-        if first_word in _CLINICAL_DURATION_WORDS:
+        direct_words = re.findall(r"\b\w+\b", remaining)[:2]
+        if any(w in _CLINICAL_DURATION_WORDS for w in direct_words):
             return False
     if remaining.startswith(
-        ("de ", "da ", "do ", "das ", "dos ", "na ", "no ", "nas ", "nos ", "em ", "com ", "para ")
+        (
+            "de ",
+            "da ",
+            "do ",
+            "das ",
+            "dos ",
+            "na ",
+            "no ",
+            "nas ",
+            "nos ",
+            "em ",
+            "com ",
+            "para ",
+            "por ",
+            "pelo ",
+            "pela ",
+            "pelos ",
+            "pelas ",
+            "e ",
+        )
     ):
         # Only the immediate prepositional phrase after "dias" (up to next
         # comma/period) determines clinical vs methodology. This catches
