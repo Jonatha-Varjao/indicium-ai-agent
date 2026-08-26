@@ -119,6 +119,37 @@ _CLINICAL_DURATION_WORDS: Final[frozenset[str]] = frozenset(
         "isolamentos",
         "quarentena",
         "quarentenas",
+        "ventilação",
+        "ventilacao",
+    }
+)
+
+# Methodology continuations that legitimately follow a window: keep exempt
+# e.g. "14 dias de observação" -> still a documented window description
+_METHODOLOGY_DURATION_WORDS: Final[frozenset[str]] = frozenset(
+    {
+        "observação",
+        "observacao",
+        "observações",
+        "observacoes",
+        "análise",
+        "analise",
+        "análises",
+        "analises",
+        "coleta",
+        "estudo",
+        "estudos",
+        "monitoramento",
+        "vigilância",
+        "vigilancia",
+        "notificação",
+        "notificacao",
+        "acompanhamento",
+        "avaliação",
+        "avaliacao",
+        "período",
+        "periodo",
+        "janela",
     }
 )
 
@@ -160,13 +191,17 @@ def _is_documented_duration(num: float, tail: str, before_context: str) -> bool:
     if remaining.startswith(
         ("de ", "da ", "do ", "das ", "dos ", "na ", "no ", "nas ", "nos ", "em ", "com ", "para ")
     ):
-        # Check next 1-2 words after preposition for clinical terms,
-        # handling modifiers like "de longa internação"
+        # A prepositional continuation after "dias" is clinical by default
+        # (e.g. "7 dias de internação", "7 dias na UTI",
+        # "7 dias de ventilação mecânica") and must be grounded.
+        # Only methodology continuations like "dias de observação" remain
+        # exempt — check next 1-2 words against the methodology allowlist.
         after_prep = remaining.split(None, 1)[1] if " " in remaining else ""
         for w in after_prep.split()[:2]:
             clean = w.strip(".,;").lower()
-            if clean in _CLINICAL_DURATION_WORDS:
-                return False
+            if clean in _METHODOLOGY_DURATION_WORDS:
+                return True
+        return False
     return True
 
 
@@ -288,15 +323,15 @@ _DIRECTION_RE: Final[re.Pattern[str]] = re.compile(
     + r")\b"
 )
 # Immediate direction phrase: word + "de" directly before the number,
-# allowing 0-2 modifiers ("queda anual de 78,12%"). Prevents distant
-# words like "Após queda anterior, mortalidade de 0,0579" from
-# misgrounding while still catching phrasing variants.
+# allowing 0-4 modifiers ("queda muito acentuada anual de 78,12%").
+# Prevents distant words like "Após queda anterior, mortalidade de
+# 0,0579" from misgrounding while still catching phrasing variants.
 _IMMEDIATE_DIRECTION_RE: Final[re.Pattern[str]] = re.compile(
     r"(?i)\b("
     + "|".join(
         sorted((*_DECREASE_WORDS, *_INCREASE_WORDS), key=len, reverse=True)
     )
-    + r")(?:\s+\w+){0,2}\s+de\s*$"
+    + r")(?:\s+\w+){0,4}\s+de\s*$"
 )
 _DECREASE_SET: Final[frozenset[str]] = frozenset(_DECREASE_WORDS)
 
