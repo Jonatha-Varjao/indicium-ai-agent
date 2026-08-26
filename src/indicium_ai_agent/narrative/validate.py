@@ -36,10 +36,12 @@ _DURATION_CONTEXT: Final[re.Pattern[str]] = re.compile(
     r"\s*(?:a\s+\d+)?\s*dias?\b", re.IGNORECASE
 )
 # Methodology anchors that legitimise a window reference; must appear
-# within the short window before the token.
+# within the short window before the token. Only explicitly methodological
+# frames are allowed — generic clinical framings ("durante 7 dias",
+# "ao longo de 7 dias") are NOT exempt and stay subject to grounding.
 _DURATION_ANCHOR_RE: Final[re.Pattern[str]] = re.compile(
     r"(?:últim[oa]s|ultimos|próxim[oa]s|proximos|per[íi]odo(?:\s+de)?|"
-    r"janela(?:\s+de)?|ao\s+longo\s+de|durante)\s+[^.;]{0,20}$",
+    r"janela(?:\s+de)?)\s+[^.;]{0,20}$",
     re.IGNORECASE,
 )
 

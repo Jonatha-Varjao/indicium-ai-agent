@@ -161,10 +161,29 @@ def test_anchored_duration_frames_still_skipped() -> None:
     for frame in (
         "dados dos últimos 14 dias.",
         "acompanhamento nos próximos 7 dias.",
-        "evolução ao longo de 7 dias.",
-        "monitoramento durante 14 dias.",
+        "evolução no período de 7 dias.",
+        "janela de 14 dias.",
     ):
         assert _extract_all_numbers(frame) == [], frame
+
+
+def test_generic_clinical_durante_not_exempt() -> None:
+    """Review regression: generic 'durante 7 dias' (clinical duration)
+    must be grounded, not silently exempt as a methodology window."""
+    from indicium_ai_agent.narrative.validate import _extract_all_numbers
+
+    for text in (
+        "pacientes foram hospitalizados durante 7 dias.",
+        "tratamento durou ao longo de 7 dias.",
+        "observado durante 14 dias na coorte.",
+    ):
+        extracted = _extract_all_numbers(text)
+        raws = {raw for raw, _v, _s in extracted}
+        assert "7" in raws or "14" in raws, text
+
+        metrics = {"mortality_rate": {"computable": True, "value": 0.0579}}
+        ok, diffs = check_numeric_grounding(text, metrics)
+        assert ok is False, f"should flag clinical {text!r}: diffs={diffs}"
 
 
 def test_numeric_grounding_accepts_signed_literal_without_direction_word() -> None:
@@ -219,7 +238,7 @@ def test_extract_skips_prose_noise() -> None:
 
     text = (
         "Em 1º de janeiro e 20 de julho de 2026, casos de COVID-19 "
-        "caíram ao longo de 7 dias."
+        "caíram nos últimos 7 dias."
     )
     assert _extract_all_numbers(text) == []
 
