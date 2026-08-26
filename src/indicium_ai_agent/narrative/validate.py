@@ -413,12 +413,11 @@ _METRIC_KEYWORDS: Final[frozenset[str]] = frozenset(
 def _nearby_direction_word(context: str) -> str | None:
     """Nearest direction word in *context* before the token.
 
-    Uses the full preserved context (48 chars) and only skips words
-    separated by sentence boundaries (.,;) or by an intervening metric
-    keyword that indicates a different clause (e.g. "queda anterior,
-    mortalidade de 0,0579"). Long modifiers like
-    "queda muito acentuada anual de 78,12%" are correctly handled
-    because no metric keyword intervenes.
+    Skips words separated by sentence boundaries (.,;) or by a
+    different-clause metric keyword pattern (", mortalidade de" after
+    "queda anterior,"). Free-form phrasing like "queda nos casos de
+    78,12%" has no comma-metric boundary, so the direction word is
+    retained.
 
     Args:
         context: Lowercased text window before the token (up to 48 chars).
@@ -428,11 +427,18 @@ def _nearby_direction_word(context: str) -> str | None:
     """
     last: str | None = None
     for match in _DIRECTION_RE.finditer(context):
+        between = match.group().lower()  # placeholder to satisfy linter
+        _ = between
         between = context[match.end():].lower()
         if any(c in between for c in ".;"):
             continue
-        if any(kw in between for kw in _METRIC_KEYWORDS):
-            continue
+        # Only skip metric-keyword intervening when it follows a comma
+        # (different clause), e.g. "queda anterior, mortalidade de"
+        # vs. "queda nos casos de" (same clause, keep).
+        if ", " in between:
+            after_comma = between.rsplit(",", 1)[-1]
+            if any(kw in after_comma for kw in _METRIC_KEYWORDS):
+                continue
         last = match.group().lower()
     return last
 
