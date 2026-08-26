@@ -196,11 +196,14 @@ def _is_documented_duration(num: float, tail: str, before_context: str) -> bool:
         # "7 dias de ventilação mecânica") and must be grounded.
         # Only methodology continuations like "dias de observação" remain
         # exempt — check next 1-2 words against the methodology allowlist.
-        after_prep = remaining.split(None, 1)[1] if " " in remaining else ""
-        for w in after_prep.split()[:2]:
-            clean = w.strip(".,;").lower()
-            if clean in _METHODOLOGY_DURATION_WORDS:
-                return True
+        # Clinical takes priority: any clinical noun in the continuation
+        # (e.g. "de observação em internação" -> "internação") must be
+        # grounded, even if a methodology word also appears.
+        words = re.findall(r"\b\w+\b", remaining.lower())
+        if any(w in _CLINICAL_DURATION_WORDS for w in words):
+            return False
+        if any(w in _METHODOLOGY_DURATION_WORDS for w in words[:3]):
+            return True
         return False
     return True
 
