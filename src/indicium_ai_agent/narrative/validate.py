@@ -448,23 +448,24 @@ _METRIC_KEYWORDS: Final[frozenset[str]] = frozenset(
 )
 
 
-def _nearby_direction_word(context: str) -> str | None:
+def _nearby_direction_word(context: str, window: int = 48) -> str | None:
     """Nearest direction word in *context* before the token.
 
-    Skips words separated by sentence boundaries (.,;) or by a
-    different-clause metric keyword pattern (", mortalidade de" after
-    "queda anterior,"). Free-form phrasing like "queda nos casos de
-    78,12%" has no comma-metric boundary, so the direction word is
-    retained.
+    Window controls how far back to look. Signed matches use a tight
+    window (25) to avoid distant-clause misattribution
+    ("queda anterior, mortalidade de 0,0579"), while still catching
+    free-form phrasing like "queda, mortalidade de 78,12%".
 
     Args:
-        context: Lowercased text window before the token (up to 48 chars).
+        context: Lowercased text window before the token.
+        window: Max chars to look back.
 
     Returns:
         Direction word or None.
     """
+    snippet = context[-window:] if len(context) > window else context
     last: str | None = None
-    for match in _DIRECTION_RE.finditer(context):
+    for match in _DIRECTION_RE.finditer(snippet):
         word = match.group().lower()
         # Skip "aumento" when part of metric name "taxa de aumento de casos"
         if word == "aumento":
@@ -474,14 +475,7 @@ def _nearby_direction_word(context: str) -> str | None:
         between = context[match.end():].lower()
         if any(c in between for c in ".;"):
             continue
-        # Only skip metric-keyword intervening when it follows a comma
-        # (different clause), e.g. "queda anterior, mortalidade de"
-        # vs. "queda nos casos de" (same clause, keep).
-        if ", " in between:
-            after_comma = between.rsplit(",", 1)[-1]
-            if any(kw in after_comma for kw in _METRIC_KEYWORDS):
-                continue
-        last = match.group().lower()
+        last = word
     return last
 
 
@@ -503,10 +497,10 @@ def _is_grounded(num: float, allowed: float, context: str) -> bool:
         Whether the token is grounded on ``allowed``.
     """
     if _within_tolerance(num, allowed):
-        nearby = _nearby_direction_word(context)
-        if nearby is not None:
+        immediate = _immediate_direction_word(context)
+        if immediate is not None:
             expected_decrease = allowed < 0
-            is_decrease = nearby in _DECREASE_SET
+            is_decrease = immediate in _DECREASE_SET
             if expected_decrease != is_decrease:
                 return False
         return True
