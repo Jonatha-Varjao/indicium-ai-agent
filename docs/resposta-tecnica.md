@@ -620,11 +620,11 @@ Kubernetes seria excesso de engenharia para uma PoC de 5 serviços. Docker Compo
 
 | Indicador | Valor |
 |---|---|
-| Testes unitários | 158 |
-| Cobertura de código (branch) | 86% — gate `--cov-fail-under=80` |
+| Testes unitários | 187 |
+| Cobertura de código (branch) | 87% — gate `--cov-fail-under=80` |
 | Erros Ruff | 0 (E/F/I/B/UP/S/C90/RUF) |
 | Erros Mypy | 0 (strict) |
 | Módulos Python | 30 |
-| Linhas de código | ~3.370 |
+| Linhas de código | ~3.850 |
 | Serviços Docker | 5 |
 | Tempo de execução | ~30s (pinned), ~5-15min (live c/ download) |

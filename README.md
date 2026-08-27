@@ -2,7 +2,7 @@
 
 Gera relatórios automáticos de SRAG (Síndrome Respiratória Aguda Grave). Usa dados abertos do DATASUS e notícias em tempo real. Produz métricas, gráficos e narrativa analítica.
 
-**158 testes unitários | 30 fontes Python | Mypy e Ruff — 0 erros | Cobertura 86% (gate 80%)**
+**187 testes unitários | 30 fontes Python | Mypy e Ruff — 0 erros | Cobertura 87% (gate 80%)**
 
 ---
 
@@ -221,7 +221,7 @@ Na primeira execução, as chaves de API são criadas automaticamente.
 │   ├── logging/           # Nós 9-10
 │   ├── graph.py           # LangGraph
 │   └── state.py           # ReportState
-├── tests/                 # 158 testes
+├── tests/                 # 187 testes
 ├── docs/                  # Documentação
 └── outputs/               # Relatórios, logs, gráficos
 ```

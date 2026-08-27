@@ -1,7 +1,7 @@
 [project]
 name = "indicium-ai-agent"
 version = "0.1.0"
-description = "Add your description here"
+description = "SRAG Surveillance Report Agent — automated epidemiological reports via DATASUS, Tavily and Gemini with strict numeric guardrails"
 readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [

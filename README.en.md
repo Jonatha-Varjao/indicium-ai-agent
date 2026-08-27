@@ -2,7 +2,7 @@
 
 Generates automated SRAG (Severe Acute Respiratory Syndrome) reports. Uses open data from DATASUS and real-time news. Produces metrics, charts, and analytical narrative.
 
-**158 unit tests | 30 Python modules | Mypy and Ruff — 0 errors | Coverage 86% (gate 80%)**
+**187 unit tests | 30 Python modules | Mypy and Ruff — 0 errors | Coverage 87% (gate 80%)**
 
 ---
 
@@ -221,7 +221,7 @@ On first run, API keys are created automatically.
 │   ├── logging/           # Nodes 9-10
 │   ├── graph.py           # LangGraph
 │   └── state.py           # ReportState
-├── tests/                 # 158 tests
+├── tests/                 # 187 tests
 ├── docs/                  # Documentation
 └── outputs/               # Reports, logs, charts
 ```
