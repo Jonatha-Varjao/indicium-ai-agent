@@ -9,14 +9,15 @@ Gera relatórios automáticos de SRAG (Síndrome Respiratória Aguda Grave). Usa
 ## Arquitetura
 
 ```mermaid
+%%{init: {'theme':'base','themeVariables':{'lineColor':'#90a4ae','edgeLabelBackground':'#263238','primaryTextColor':'#ffffff'}}}%%
 flowchart TD
-    classDef process fill:#e3f2fd,stroke:#1976d2,stroke-width:2px;
-    classDef external fill:#fff3e0,stroke:#f57c00,stroke-width:2px;
-    classDef output fill:#e8f5e9,stroke:#388e3c,stroke-width:2px;
-    classDef guardrail fill:#ffebee,stroke:#c62828,stroke-width:2px;
-    classDef telemetry fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px;
-    classDef future fill:#eeeeee,stroke:#9e9e9e,stroke-width:1px,stroke-dasharray: 5 5;
-    classDef errorpath fill:#fff9c4,stroke:#f9a825,stroke-width:2px;
+    classDef process fill:#1565c0,stroke:#0d47a1,color:#ffffff,stroke-width:2.5px;
+    classDef external fill:#ef6c00,stroke:#e65100,color:#ffffff,stroke-width:2.5px;
+    classDef output fill:#2e7d32,stroke:#1b5e20,color:#ffffff,stroke-width:2.5px;
+    classDef guardrail fill:#c62828,stroke:#b71c1c,color:#ffffff,stroke-width:2.5px;
+    classDef telemetry fill:#6a1b9a,stroke:#4a148c,color:#ffffff,stroke-width:2.5px;
+    classDef future fill:#424242,stroke:#757575,color:#e0e0e0,stroke-width:1.5px,stroke-dasharray:5 5;
+    classDef errorpath fill:#f9a825,stroke:#f57f17,color:#000000,stroke-width:2.5px;
 
     subgraph Graph [LangGraph Orchestrator — deterministic control flow, LLM only in Node 6]
         NodeSync[Node 0: check_and_sync_data<br/>live: check freshness, download if newer<br/>pinned: use committed snapshot]:::process
