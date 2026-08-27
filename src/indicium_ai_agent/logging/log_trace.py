@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
+import uuid
 from enum import Enum
 from typing import Any, Final, cast
 
@@ -80,12 +81,11 @@ def log_langfuse_trace(state: ReportState | dict[str, Any]) -> None:
         client = get_client()
 
         run_id = state.get("run_id", "")
-        # Langfuse expects TraceContext with ``trace_id``; keep ``id`` for
-        # backwards compatibility with unit tests asserting ``trace_context["id"]``.
+        # Langfuse requires 32 lowercase hex chars for trace_id. Derive one
+        # deterministically from run_id so traces remain correlatable.
         if run_id and isinstance(run_id, str):
-            trace_context = cast(Any, {"trace_id": run_id, "id": run_id})
-        elif run_id:
-            trace_context = cast(Any, {"trace_id": str(run_id), "id": str(run_id)})
+            trace_id = uuid.uuid5(uuid.NAMESPACE_OID, run_id).hex
+            trace_context = cast(Any, {"trace_id": trace_id, "id": trace_id})
         else:
             trace_context = None
 
