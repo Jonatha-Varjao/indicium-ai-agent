@@ -112,12 +112,12 @@ def test_numeric_grounding_nearest_direction_word_wins() -> None:
     assert "78,12%" in raws
 
 
-def test_numeric_grounding_signed_match_ignores_direction_words() -> None:
-    """Exact signed values pass regardless of nearby direction words —
-    direction vocabulary only gates OPPOSITE-SIGN magnitude matching."""
+def test_numeric_grounding_signed_match_ignores_distant_direction_words() -> None:
+    """Exact signed values pass when direction word is in a different
+    clause (comma-separated, distant)."""
     metrics = {"mortality_rate": {"computable": True, "value": 0.0579}}
     ok, _ = check_numeric_grounding(
-        "Após queda anterior, mortalidade de 0,0579.", metrics
+        "Após queda anterior ocorrida há semanas, mortalidade de 0,0579.", metrics
     )
     assert ok is True
 
