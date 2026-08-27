@@ -475,6 +475,9 @@ def _nearby_direction_word(context: str, window: int = 48) -> str | None:
         between = context[match.end():].lower()
         if any(c in between for c in ".;"):
             continue
+        # Skip "queda anterior, ..." where "anterior" indicates previous event
+        if "anterior" in between:
+            continue
         last = word
     return last
 
@@ -497,10 +500,10 @@ def _is_grounded(num: float, allowed: float, context: str) -> bool:
         Whether the token is grounded on ``allowed``.
     """
     if _within_tolerance(num, allowed):
-        immediate = _immediate_direction_word(context)
-        if immediate is not None:
+        nearby = _nearby_direction_word(context, window=48)
+        if nearby is not None:
             expected_decrease = allowed < 0
-            is_decrease = immediate in _DECREASE_SET
+            is_decrease = nearby in _DECREASE_SET
             if expected_decrease != is_decrease:
                 return False
         return True
