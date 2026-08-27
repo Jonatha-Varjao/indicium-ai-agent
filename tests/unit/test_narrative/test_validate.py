@@ -113,11 +113,22 @@ def test_numeric_grounding_nearest_direction_word_wins() -> None:
 
 
 def test_numeric_grounding_signed_match_ignores_distant_direction_words() -> None:
-    """Exact signed values pass when direction word is in a different
-    clause (comma-separated, distant)."""
+    """Exact signed values pass when direction word is far outside the
+    48-char window (distant clause)."""
     metrics = {"mortality_rate": {"computable": True, "value": 0.0579}}
     ok, _ = check_numeric_grounding(
-        "Após queda anterior ocorrida há semanas, mortalidade de 0,0579.", metrics
+        "Após queda anterior ocorrida há semanas atrás em outro contexto distante, "
+        "mortalidade de 0,0579.",
+        metrics,
+    )
+    assert ok is True
+
+
+def test_numeric_grounding_ignores_nearby_anterior_qualifier() -> None:
+    """Nearby 'queda anterior, mortalidade de' must not misattribute."""
+    metrics = {"mortality_rate": {"computable": True, "value": 0.0579}}
+    ok, _ = check_numeric_grounding(
+        "Após queda anterior, mortalidade de 0,0579.", metrics
     )
     assert ok is True
 
