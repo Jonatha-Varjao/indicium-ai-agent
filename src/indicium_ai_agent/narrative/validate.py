@@ -31,9 +31,11 @@ _DATE_CONTEXT: Final[re.Pattern[str]] = re.compile(
     rf"\s*(?:[ae]\s+\d{{1,2}}\s*)?(?:de\s+)?{ _MONTHS_PT }\b", re.IGNORECASE
 )
 # Numbers followed by "dia(s)" are duration references to documented
-# windows; "a N" covers ranges ("últimos 7 a 14 dias").
+# windows; range separators include "a", "e", "-", "-", "-", "~"
+# (e.g. "últimos 7 a 14 dias", "últimos ~7-14 dias", "7-14 dias").
 _DURATION_CONTEXT: Final[re.Pattern[str]] = re.compile(
-    r"\s*(?:a\s+\d+)?\s*dias?\b", re.IGNORECASE
+    r"\s*(?:[aàe~–—\-]+\s*\d+)?\s*dias?\b",  # noqa: RUF001
+    re.IGNORECASE,
 )
 # Methodology anchors that legitimise a window reference.
 # The anchor must be immediately adjacent to the duration token (or its
@@ -41,9 +43,10 @@ _DURATION_CONTEXT: Final[re.Pattern[str]] = re.compile(
 # This prevents leakage: "nos últimos 30 dias, 7 dias de internação"
 # must NOT exempt the second "7 dias" (anchor "últimos" is followed by
 # an intervening "30 dias," -> not adjacent).
+# Range separators include "a", "e", "-", "-", "-", "~" (e.g. "~7-14").
 _DURATION_ANCHOR_RE: Final[re.Pattern[str]] = re.compile(
     r"(?:últim[oa]s|ultimos|próxim[oa]s|proximos|per[íi]odo(?:\s+de)?|"
-    r"janela(?:\s+de)?)(?:\s+\d+\s*a)?\s*$",
+    r"janela(?:\s+de)?)(?:\s*~?\s*\d+\s*[aàe–—\-~]+\s*)?\s*[~–—\-]*\s*$",  # noqa: RUF001
     re.IGNORECASE,
 )
 
@@ -461,8 +464,12 @@ def _nearby_direction_word(context: str) -> str | None:
     """
     last: str | None = None
     for match in _DIRECTION_RE.finditer(context):
-        between = match.group().lower()  # placeholder to satisfy linter
-        _ = between
+        word = match.group().lower()
+        # Skip "aumento" when part of metric name "taxa de aumento de casos"
+        if word == "aumento":
+            before_word = context[max(0, match.start() - 20):match.start()].lower()
+            if "taxa de " in before_word:
+                continue
         between = context[match.end():].lower()
         if any(c in between for c in ".;"):
             continue
