@@ -363,15 +363,16 @@ _DIRECTION_RE: Final[re.Pattern[str]] = re.compile(
     + r")\b"
 )
 # Immediate direction phrase: word + "de" directly before the number,
-# allowing 0-4 modifiers ("queda muito acentuada anual de 78,12%").
-# Prevents distant words like "Após queda anterior, mortalidade de
-# 0,0579" from misgrounding while still catching phrasing variants.
+# allowing 0-6 modifiers ("queda muito acentuada anual extra longa de
+# 78,12%"). Prevents distant words like "Após queda anterior,
+# mortalidade de 0,0579" from misgrounding while still catching long
+# phrasing variants.
 _IMMEDIATE_DIRECTION_RE: Final[re.Pattern[str]] = re.compile(
     r"(?i)\b("
     + "|".join(
         sorted((*_DECREASE_WORDS, *_INCREASE_WORDS), key=len, reverse=True)
     )
-    + r")(?:\s+\w+){0,4}\s+de\s*$"
+    + r")(?:\s+\w+){0,6}\s+de\s*$"
 )
 _DECREASE_SET: Final[frozenset[str]] = frozenset(_DECREASE_WORDS)
 
